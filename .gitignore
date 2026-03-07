@@ -1,0 +1,12 @@
+# Frontend
+apps/web/node_modules/
+apps/web/dist/
+
+# Python
+apps/api/.venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Env/config
+.env
