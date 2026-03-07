@@ -3,5 +3,17 @@ services:
     name: applypilot-api
     runtime: python
     rootDir: apps/api
+    healthCheckPath: /health
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: MAX_FILE_BYTES
+        value: "5242880"
+      - key: CORS_ORIGINS
+        value: https://tryapplypilot.com,https://www.tryapplypilot.com
+      - key: OPENAI_API_KEY
+        sync: false

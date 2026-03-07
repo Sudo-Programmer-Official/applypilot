@@ -19,7 +19,7 @@ Frontend:
 ```bash
 cd apps/web
 npm install
-cp .env.example .env
+printf "VITE_API_BASE=http://localhost:8000\n" > .env
 npm run dev
 ```
 
@@ -27,6 +27,7 @@ npm run dev
 
 Backend variables live in `apps/api/.env.example`.
 Frontend variables live in `apps/web/.env.example`.
+Production frontend base URL should be `https://api.tryapplypilot.com`.
 
 ## Deploy
 
@@ -35,13 +36,15 @@ Render:
 - Blueprint config is in `render.yaml`.
 - Service root directory is `apps/api`.
 - Start command is `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+- Set the custom domain to `api.tryapplypilot.com`.
 
 Vercel:
 
 - Set project root to `apps/web`.
 - Build command: `npm run build`
 - Output directory: `dist`
-- Set `VITE_API_BASE` to your deployed backend URL.
+- Set `VITE_API_BASE` to `https://api.tryapplypilot.com`.
+- Connect `tryapplypilot.com` and `www.tryapplypilot.com`.
 
 ## CI
 

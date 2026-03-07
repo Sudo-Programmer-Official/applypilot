@@ -21,7 +21,7 @@ SUPPORTED_RESUME_TYPES = {".pdf", ".docx"}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    logger.info("Starting ApplyPilot API")
+    logger.info("Starting ApplyPilot API env=%s cors_origins=%s", settings.environment, settings.cors_origins)
     yield
     logger.info("Shutting down ApplyPilot API")
 

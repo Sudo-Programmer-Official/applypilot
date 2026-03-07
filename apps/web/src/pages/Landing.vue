@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import axios from 'axios'
 
 interface PipelineResult {
@@ -21,6 +21,15 @@ const loading = ref(false)
 const error = ref('')
 const result = ref<PipelineResult | null>(null)
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const loadingStages = [
+  'Parsing resume...',
+  'Analyzing job...',
+  'Optimizing resume...',
+  'Calculating ATS score...',
+]
+const loadingStageIndex = ref(0)
+let loadingTimer: number | null = null
+
 const diffLines = computed<DiffLine[]>(() => {
   const rawDiff = result.value?.diff?.unified?.trim()
   if (!rawDiff) {
@@ -40,6 +49,22 @@ const diffLines = computed<DiffLine[]>(() => {
     return { type: 'context', value: line }
   })
 })
+const currentLoadingStage = computed(() => loadingStages[loadingStageIndex.value] ?? loadingStages[0])
+
+function startLoadingTicker() {
+  stopLoadingTicker()
+  loadingStageIndex.value = 0
+  loadingTimer = window.setInterval(() => {
+    loadingStageIndex.value = (loadingStageIndex.value + 1) % loadingStages.length
+  }, 900)
+}
+
+function stopLoadingTicker() {
+  if (loadingTimer !== null) {
+    window.clearInterval(loadingTimer)
+    loadingTimer = null
+  }
+}
 
 function onFileChange(event: Event) {
   const target = event.target as HTMLInputElement
@@ -62,24 +87,30 @@ async function analyze() {
   }
 
   loading.value = true
+  startLoadingTicker()
   try {
     const response = await axios.post(`${apiBase}/resume/analyze`, form)
     result.value = response.data?.result ?? null
   } catch (err: any) {
     error.value = err?.response?.data?.detail || 'Failed to analyze resume.'
   } finally {
+    stopLoadingTicker()
     loading.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  stopLoadingTicker()
+})
 </script>
 
 <template>
   <main class="landing">
     <section class="hero">
       <p class="eyebrow">ApplyPilot</p>
-      <h1>Your Resume vs The Job - See Exactly What's Missing</h1>
+      <h1>Stop Applying With The Same Resume</h1>
       <p class="lede">
-        Upload your resume and a job description. ApplyPilot analyzes missing keywords and generates an optimized resume with a transparent diff.
+        Upload your resume and a job description. ApplyPilot shows exactly what to change to increase interview chances.
       </p>
       <div class="cta-row">
         <label class="file-btn" for="resume-input">Choose Resume</label>
@@ -99,6 +130,17 @@ async function analyze() {
     </section>
 
     <section v-if="error" class="error">{{ error }}</section>
+
+    <section v-if="loading" class="loading-panel">
+      <div class="loading-copy">
+        <p class="loading-label">Analysis in progress</p>
+        <h3>{{ currentLoadingStage }}</h3>
+        <p>We are running the full resume-vs-job pipeline now.</p>
+      </div>
+      <div class="loading-bar" aria-hidden="true">
+        <span class="loading-bar-fill"></span>
+      </div>
+    </section>
 
     <section v-if="result" class="results">
       <div class="stat-card">
@@ -277,6 +319,50 @@ textarea:focus {
   padding: 12px 16px;
 }
 
+.loading-panel {
+  max-width: 900px;
+  margin: 0 auto 16px;
+  border-radius: 18px;
+  padding: 22px;
+  background: linear-gradient(135deg, #0f172a, #1d4ed8);
+  color: #eff6ff;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+}
+
+.loading-copy h3 {
+  margin: 4px 0 8px;
+  font-size: 1.4rem;
+}
+
+.loading-copy p {
+  margin: 0;
+  color: #dbeafe;
+}
+
+.loading-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.loading-bar {
+  margin-top: 18px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.loading-bar-fill {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #bfdbfe, #ffffff, #93c5fd);
+  animation: loading-slide 1.2s ease-in-out infinite;
+}
+
 .results {
   max-width: 1080px;
   margin: 0 auto;
@@ -429,6 +515,16 @@ textarea:focus {
 
   .cta-row {
     flex-direction: column;
+  }
+}
+
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(280%);
   }
 }
 </style>
