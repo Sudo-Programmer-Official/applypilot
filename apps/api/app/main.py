@@ -36,6 +36,12 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root():
+    """Friendly root endpoint for smoke tests on the API domain."""
+    return {"service": settings.api_title, "status": "running"}
+
+
 @app.get("/health")
 async def health_check():
     """Lightweight liveness probe endpoint."""
