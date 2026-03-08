@@ -382,26 +382,111 @@ def analyze_job_description(job_description: str, limit: int = 10) -> Dict[str, 
 
 
 def extract_resume_skills(resume_text: str) -> List[Dict[str, Any]]:
-    normalized_text = _normalize_text(resume_text)
+    return _score_resume_skill_segments(
+        [{"label": "resume", "text": resume_text, "weight": 1}],
+        reason_template="Found {count} mention{suffix} in the resume.",
+    )
+
+
+def extract_resume_skills_from_document(document: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not document:
+        return []
+
+    segments: List[Dict[str, Any]] = []
+    if document.get("title"):
+        segments.append({"label": "title", "text": document.get("title", ""), "weight": 3})
+    if document.get("summary"):
+        segments.append({"label": "summary", "text": document.get("summary", ""), "weight": 2})
+
+    for category, values in (document.get("skills") or {}).items():
+        segments.append(
+            {
+                "label": f"skills:{category}",
+                "text": f"{category} {' '.join(values)}",
+                "weight": 4,
+            }
+        )
+
+    for item in document.get("experience") or []:
+        segments.append(
+            {
+                "label": "experience_heading",
+                "text": " ".join(
+                    part for part in [item.get("role", ""), item.get("company", ""), item.get("date", "")]
+                    if part
+                ),
+                "weight": 2,
+            }
+        )
+        for bullet in item.get("bullets") or []:
+            segments.append({"label": "experience_bullet", "text": bullet, "weight": 1})
+
+    for item in document.get("projects") or []:
+        segments.append(
+            {
+                "label": "project_heading",
+                "text": " ".join(part for part in [item.get("name", ""), item.get("details", "")] if part),
+                "weight": 2,
+            }
+        )
+        for bullet in item.get("bullets") or []:
+            segments.append({"label": "project_bullet", "text": bullet, "weight": 1})
+
+    return _score_resume_skill_segments(
+        segments,
+        reason_template="Found {count} weighted mention{suffix} across structured resume sections.",
+    )
+
+
+def _score_resume_skill_segments(
+    segments: List[Dict[str, Any]],
+    reason_template: str,
+) -> List[Dict[str, Any]]:
     matched_skills: List[Dict[str, Any]] = []
+    normalized_segments = [
+        {
+            "label": segment["label"],
+            "text": _normalize_text(str(segment.get("text", ""))),
+            "weight": int(segment.get("weight", 1)),
+        }
+        for segment in segments
+        if str(segment.get("text", "")).strip()
+    ]
+
     for entry in _SKILL_LIBRARY:
         count = 0
-        for pattern in entry["patterns"]:
-            count += len(re.findall(pattern, normalized_text))
+        score = 0
+        sources: List[str] = []
+        for segment in normalized_segments:
+            segment_hits = 0
+            for pattern in entry["patterns"]:
+                segment_hits += len(re.findall(pattern, segment["text"]))
+            if segment_hits == 0:
+                continue
+            count += segment_hits
+            score += segment_hits * max(segment["weight"], 1)
+            sources.append(segment["label"])
+
         if count == 0:
             continue
+
+        unique_sources = sorted(set(sources))
+        reason = reason_template.format(count=count, suffix="s" if count != 1 else "")
+        if unique_sources:
+            reason = f"{reason} Sources: {', '.join(unique_sources[:3])}."
+
         matched_skills.append(
             {
                 "name": entry["name"],
                 "category": entry["category"],
                 "count": count,
-                "score": count * 2,
-                "reason": f"Found {count} mention{'s' if count != 1 else ''} in the resume.",
+                "score": score,
+                "reason": reason,
                 "suggested_sections": _suggest_sections(entry["category"]),
             }
         )
 
-    matched_skills.sort(key=lambda item: (-item["count"], item["name"]))
+    matched_skills.sort(key=lambda item: (-item["score"], -item["count"], item["name"]))
     return matched_skills
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -18,9 +19,15 @@ from .models.job_import import JobImportRequest, JobImportResponse
 from .orchestrator.resume_pipeline import run_resume_pipeline
 from .orchestrator.suggestion_pipeline import apply_suggestion_pipeline
 from packages.job_importer import import_job_posting
-from packages.postgres_store import ensure_schema, persist_pipeline_result
+from packages.postgres_store import (
+    ensure_schema,
+    get_parsed_resume_by_source_hash,
+    persist_pipeline_result,
+    upsert_parsed_resume,
+)
 from packages.resume_formatter.builder import build_resume_document
 from packages.resume_formatter.renderer import render_resume_pdf
+from packages.resume_parser import PARSER_VERSION, parse_resume
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level, logging.INFO),
@@ -85,6 +92,32 @@ async def import_job(request: JobImportRequest):
         raise HTTPException(status_code=500, detail="Job import failed.") from exc
 
 
+@app.post("/resume/parse")
+async def parse_resume_upload(file: UploadFile = File(...)):
+    filename, temp_path, size_bytes, file_hash = await _store_upload(file)
+
+    logger.info("Parsing resume file=%s size_bytes=%s", filename, size_bytes)
+    try:
+        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
+        parsed_resume_id = upsert_parsed_resume(settings.database_url, parsed_resume)
+        if parsed_resume_id:
+            logger.info("Persisted parsed resume parsed_resume_id=%s", parsed_resume_id)
+        return {"status": "ok", "parsed": parsed_resume}
+    except ValueError as exc:
+        logger.warning("Resume parsing rejected: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        logger.warning("Resume file missing during parsing: %s", exc)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Resume parsing failed")
+        raise HTTPException(status_code=500, detail="Resume parsing failed.") from exc
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
 def _cleanup_file(path: str) -> None:
     Path(path).unlink(missing_ok=True)
 
@@ -96,7 +129,7 @@ def _pdf_file_name(original_file_name: str | None, use_optimized: bool) -> str:
     return f"{stem}_{suffix}.pdf"
 
 
-async def _store_upload(file: UploadFile) -> tuple[str, str, int]:
+async def _store_upload(file: UploadFile) -> tuple[str, str, int, str]:
     filename = file.filename or "resume"
     suffix = Path(filename).suffix.lower()
     if suffix not in SUPPORTED_RESUME_TYPES:
@@ -105,12 +138,35 @@ async def _store_upload(file: UploadFile) -> tuple[str, str, int]:
     contents = await file.read()
     if len(contents) > settings.max_file_bytes:
         raise HTTPException(status_code=400, detail="File too large. Max 5 MB.")
+    file_hash = hashlib.sha256(contents).hexdigest()
 
     with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(contents)
         temp_path = tmp.name
 
-    return filename, temp_path, len(contents)
+    return filename, temp_path, len(contents), file_hash
+
+
+def _load_parsed_resume(temp_path: str, filename: str, file_hash: str) -> dict:
+    parsed_resume = get_parsed_resume_by_source_hash(
+        settings.database_url,
+        file_hash,
+        parser_version=PARSER_VERSION,
+    )
+    if parsed_resume:
+        parsed_resume["file_name"] = filename
+        parsed_resume.setdefault("metadata", {})["source_file_hash"] = file_hash
+        logger.info(
+            "Reusing parsed resume parsed_resume_id=%s file_hash=%s",
+            parsed_resume.get("id"),
+            file_hash[:12],
+        )
+        return parsed_resume
+
+    parsed_resume = parse_resume(temp_path)
+    parsed_resume["file_name"] = filename
+    parsed_resume.setdefault("metadata", {})["source_file_hash"] = file_hash
+    return parsed_resume
 
 
 @app.post("/resume/analyze")
@@ -124,15 +180,17 @@ async def analyze_resume(
 
     Accepts PDF or DOCX uploads. Job description is optional for now.
     """
-    filename, temp_path, size_bytes = await _store_upload(file)
+    filename, temp_path, size_bytes, file_hash = await _store_upload(file)
 
     logger.info("Analyzing resume file=%s size_bytes=%s", filename, size_bytes)
     try:
-        result = run_resume_pipeline(temp_path, job_description)
+        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
+        result = run_resume_pipeline(temp_path, job_description, parsed_resume=parsed_resume)
         persistence_ids = persist_pipeline_result(settings.database_url, result, job_url=job_url)
         if persistence_ids:
             logger.info(
-                "Persisted resume analysis analysis_id=%s optimized_resume_id=%s",
+                "Persisted resume analysis parsed_resume_id=%s analysis_id=%s optimized_resume_id=%s",
+                persistence_ids.get("parsed_resume_id"),
                 persistence_ids.get("analysis_id"),
                 persistence_ids.get("optimized_resume_id"),
             )
@@ -157,15 +215,17 @@ async def apply_resume_suggestions(file: UploadFile = File(...), suggestions: st
     if not suggestions.strip():
         raise HTTPException(status_code=400, detail="Paste at least one suggestion before applying changes.")
 
-    filename, temp_path, size_bytes = await _store_upload(file)
+    filename, temp_path, size_bytes, file_hash = await _store_upload(file)
 
     logger.info("Applying resume suggestions file=%s size_bytes=%s", filename, size_bytes)
     try:
-        result = apply_suggestion_pipeline(temp_path, suggestions)
+        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
+        result = apply_suggestion_pipeline(temp_path, suggestions, parsed_resume=parsed_resume)
         persistence_ids = persist_pipeline_result(settings.database_url, result)
         if persistence_ids:
             logger.info(
-                "Persisted suggestion run analysis_id=%s optimized_resume_id=%s",
+                "Persisted suggestion run parsed_resume_id=%s analysis_id=%s optimized_resume_id=%s",
+                persistence_ids.get("parsed_resume_id"),
                 persistence_ids.get("analysis_id"),
                 persistence_ids.get("optimized_resume_id"),
             )

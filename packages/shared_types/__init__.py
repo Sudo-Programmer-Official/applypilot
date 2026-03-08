@@ -3,6 +3,7 @@ from .resume_document import (
     ResumeDocument,
     ResumeEducationItem,
     ResumeExperienceItem,
+    ResumeLayoutBlock,
     ResumeProjectItem,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "ResumeDocument",
     "ResumeEducationItem",
     "ResumeExperienceItem",
+    "ResumeLayoutBlock",
     "ResumeProjectItem",
 ]

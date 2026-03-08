@@ -2,33 +2,85 @@
 from __future__ import annotations
 
 import re
+from statistics import median
 from typing import Dict, Iterable, List, Tuple
 
+from .normalizer import normalize_resume_line
 from packages.shared_types.resume_document import (
     ResumeDocument,
     ResumeEducationItem,
     ResumeExperienceItem,
+    ResumeLayoutBlock,
     ResumeProjectItem,
 )
 
 _SECTION_ALIASES = {
     "education": "education",
     "technical skills": "skills",
+    "technical expertise": "skills",
+    "skills and tools": "skills",
+    "skills & tools": "skills",
     "skills": "skills",
     "core skills": "skills",
+    "certifications": "skills",
+    "certification": "skills",
     "experience": "experience",
     "professional experience": "experience",
     "work experience": "experience",
     "employment": "experience",
     "projects": "projects",
     "selected projects": "projects",
+    "publications": "projects",
+    "publication": "projects",
+    "research": "projects",
     "summary": "summary",
     "professional summary": "summary",
     "profile": "summary",
     "target role alignment": "summary",
+    "objective": "summary",
+}
+
+_COMPACT_SECTION_ALIASES = {
+    re.sub(r"[^a-z]", "", alias): section for alias, section in _SECTION_ALIASES.items()
 }
 
 _BULLET_PREFIXES = ("- ", "* ", "• ", "\u2022 ")
+_ROLE_KEYWORDS = {
+    "engineer",
+    "developer",
+    "intern",
+    "manager",
+    "lead",
+    "architect",
+    "scientist",
+    "analyst",
+    "consultant",
+    "assistant",
+    "specialist",
+    "director",
+    "administrator",
+    "owner",
+    "founder",
+    "researcher",
+}
+_COMPANY_HINTS = {
+    "inc",
+    "llc",
+    "ltd",
+    "corp",
+    "corporation",
+    "company",
+    "technologies",
+    "technology",
+    "systems",
+    "solutions",
+    "labs",
+    "health",
+    "university",
+    "institute",
+    "bank",
+    "group",
+}
 _DATE_PATTERN = re.compile(
     r"(?P<date>("
     r"(?:[A-Za-z]{3,9}\s+\d{4}(?:\s*\(Expected\))?(?:\s*[-\u2013]\s*(?:[A-Za-z]{3,9}\s+\d{4}|Present|Current))?)"
@@ -37,8 +89,12 @@ _DATE_PATTERN = re.compile(
 )
 
 
-def build_resume_document(resume_text: str, role_label: str | None = None) -> ResumeDocument:
-    sections = _split_sections(resume_text or "")
+def build_resume_document(
+    resume_text: str,
+    role_label: str | None = None,
+    layout_blocks: List[ResumeLayoutBlock] | None = None,
+) -> ResumeDocument:
+    sections = _split_layout_sections(layout_blocks) if layout_blocks else _split_sections(resume_text or "")
     name, title, contact_items, header_summary = _parse_header(sections.get("header", []), role_label)
     summary_lines = sections.get("summary", []) or ([header_summary] if header_summary else [])
 
@@ -89,19 +145,66 @@ def _split_sections(resume_text: str) -> Dict[str, List[str]]:
     return sections
 
 
+def _split_layout_sections(blocks: List[ResumeLayoutBlock]) -> Dict[str, List[str]]:
+    sections: Dict[str, List[str]] = {
+        "header": [],
+        "summary": [],
+        "education": [],
+        "skills": [],
+        "experience": [],
+        "projects": [],
+    }
+    if not blocks:
+        return sections
+
+    font_sizes = [block.font_size for block in blocks if block.font_size > 0]
+    baseline_font = median(font_sizes) if font_sizes else 11.0
+    current_section = "header"
+
+    for block in sorted(blocks, key=lambda item: (item.page, item.order, item.top, item.x0)):
+        line = _normalize_line(block.text)
+        if not line:
+            continue
+
+        section_key = _layout_section_key(line, block, baseline_font)
+        if section_key:
+            current_section = section_key
+            continue
+
+        sections.setdefault(current_section, []).append(line)
+
+    return sections
+
+
 def _section_key(line: str) -> str | None:
     normalized = re.sub(r"[:\s]+", " ", line.strip().lower()).strip()
-    return _SECTION_ALIASES.get(normalized)
+    compact = re.sub(r"[^a-z]", "", normalized)
+    return _SECTION_ALIASES.get(normalized) or _COMPACT_SECTION_ALIASES.get(compact)
+
+
+def _layout_section_key(line: str, block: ResumeLayoutBlock, baseline_font: float) -> str | None:
+    explicit = _section_key(line)
+    if explicit:
+        return explicit
+
+    normalized_style = block.style_name.lower().strip()
+    if normalized_style.startswith("heading") or normalized_style in {"title", "subtitle"}:
+        return _section_key(line)
+
+    looks_like_header = (
+        len(line.split()) <= 4
+        and not _looks_like_contact(line)
+        and not re.search(r"\d{4}", line)
+        and (block.is_bold or block.font_size >= baseline_font * 1.18)
+    )
+    if looks_like_header:
+        return _section_key(line)
+
+    return None
 
 
 def _normalize_line(line: str) -> str:
-    cleaned = line.replace("\xa0", " ").strip()
-    if "|" in cleaned:
-        cleaned = cleaned.replace("|", " | ")
-    if cleaned and " " not in cleaned and re.search(r"[a-z][A-Z]", cleaned):
-        cleaned = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip()
+    return normalize_resume_line(line)
 
 
 def _parse_header(header_lines: List[str], role_label: str | None) -> Tuple[str, str, List[str], str]:
@@ -216,27 +319,41 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
         bullet = _strip_bullet(line)
         if bullet:
             if current is None:
-                current = ResumeExperienceItem(role="Experience", company="", date="", bullets=[])
+                current = ResumeExperienceItem(role="Experience", company="", date="", start_date="", end_date="", bullets=[])
                 entries.append(current)
             current.bullets.append(_truncate_text(bullet, 140))
             current.bullets = current.bullets[:5]
             continue
 
         if current and current.bullets:
-            role, company, date = _parse_role_company_date(line)
+            role, company, date, start_date, end_date = _parse_role_company_date(line)
             if role or company or date:
-                current = ResumeExperienceItem(role=role, company=company, date=date, bullets=[])
+                current = ResumeExperienceItem(
+                    role=role,
+                    company=company,
+                    date=date,
+                    start_date=start_date,
+                    end_date=end_date,
+                    bullets=[],
+                )
                 entries.append(current)
                 continue
 
-        role, company, date = _parse_role_company_date(line)
+        role, company, date, start_date, end_date = _parse_role_company_date(line)
         if role or company or date:
-            current = ResumeExperienceItem(role=role, company=company, date=date, bullets=[])
+            current = ResumeExperienceItem(
+                role=role,
+                company=company,
+                date=date,
+                start_date=start_date,
+                end_date=end_date,
+                bullets=[],
+            )
             entries.append(current)
             continue
 
         if current is None:
-            current = ResumeExperienceItem(role=line, company="", date="", bullets=[])
+            current = ResumeExperienceItem(role=line, company="", date="", start_date="", end_date="", bullets=[])
             entries.append(current)
             continue
 
@@ -278,13 +395,22 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
     return entries[:3]
 
 
-def _parse_role_company_date(line: str) -> Tuple[str, str, str]:
+def _parse_role_company_date(line: str) -> Tuple[str, str, str, str, str]:
     main, date = _split_trailing_date(line)
-    for separator in (" - ", " – ", " -- ", " | "):
-        if separator in main:
-            left, right = main.split(separator, 1)
-            return _truncate_text(left.strip(), 70), _truncate_text(right.strip(), 70), date
-    return _truncate_text(main.strip(), 90), "", date
+    start_date, end_date = _split_date_range(date)
+    parts = _split_experience_heading(main)
+
+    if len(parts) >= 2:
+        role, company = _classify_role_company(parts)
+        return (
+            _truncate_text(role, 70),
+            _truncate_text(company, 70),
+            date,
+            start_date,
+            end_date,
+        )
+
+    return _truncate_text(main.strip(), 90), "", date, start_date, end_date
 
 
 def _split_trailing_date(line: str) -> Tuple[str, str]:
@@ -294,6 +420,62 @@ def _split_trailing_date(line: str) -> Tuple[str, str]:
     date = match.group("date").strip()
     main = line[: match.start()].strip(" ,-")
     return main, date
+
+
+def _split_date_range(value: str) -> Tuple[str, str]:
+    if not value:
+        return "", ""
+    parts = [part.strip() for part in re.split(r"\s*[-\u2013]\s*", value, maxsplit=1) if part.strip()]
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return value.strip(), ""
+
+
+def _split_experience_heading(value: str) -> List[str]:
+    for separator in (" @ ", " | ", " – ", " - ", " -- ", ", "):
+        if separator in value:
+            return [part.strip() for part in value.split(separator) if part.strip()]
+    return [value.strip()]
+
+
+def _classify_role_company(parts: List[str]) -> Tuple[str, str]:
+    if len(parts) == 2:
+        left, right = parts
+        left_role_score = _role_score(left)
+        right_role_score = _role_score(right)
+        left_company_score = _company_score(left)
+        right_company_score = _company_score(right)
+
+        if left_role_score > right_role_score or right_company_score > left_company_score:
+            return left, right
+        if right_role_score > left_role_score or left_company_score > right_company_score:
+            return right, left
+        return left, right
+
+    left = parts[0]
+    right = parts[-1]
+    middle = " - ".join(parts[1:-1]).strip()
+    if middle and _role_score(middle) >= max(_role_score(left), _role_score(right)):
+        return middle, f"{left} - {right}".strip(" -")
+    return _classify_role_company([left, " - ".join(parts[1:]).strip()])
+
+
+def _role_score(value: str) -> int:
+    lowered = value.lower()
+    score = sum(2 for token in _ROLE_KEYWORDS if token in lowered)
+    if "software" in lowered or "data" in lowered or "backend" in lowered:
+        score += 1
+    return score
+
+
+def _company_score(value: str) -> int:
+    lowered = value.lower()
+    score = sum(2 for token in _COMPANY_HINTS if token in lowered)
+    if value and value == value.title():
+        score += 1
+    if len(value.split()) <= 4:
+        score += 1
+    return score
 
 
 def _split_once(value: str, separator: str) -> Tuple[str, str]:

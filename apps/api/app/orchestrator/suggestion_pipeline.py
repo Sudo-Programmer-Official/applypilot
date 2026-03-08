@@ -2,24 +2,33 @@
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import Any, Dict, List
 
 from packages.diff_engine.diff_engine import generate_diff
-from packages.job_intelligence.extractor import extract_resume_skills
+from packages.job_intelligence.extractor import extract_resume_skills, extract_resume_skills_from_document
 from packages.readiness_score.scorer import calculate_application_readiness
 from packages.resume_formatter import build_resume_document, resume_document_to_text
 from packages.resume_parser.parser import parse_resume
 from packages.shared_types.pipeline_result import PipelineResult
+from packages.shared_types.resume_document import ResumeDocument
 from packages.suggestion_engine import apply_suggestions_to_document
 
 logger = logging.getLogger(__name__)
 
 
-def apply_suggestion_pipeline(resume_path: str, suggestions_text: str) -> PipelineResult:
+def apply_suggestion_pipeline(
+    resume_path: str,
+    suggestions_text: str,
+    parsed_resume: Dict[str, Any] | None = None,
+) -> PipelineResult:
     logger.info("Running suggestion pipeline for path=%s", resume_path)
-    parsed = parse_resume(resume_path)
+    parsed = parsed_resume or parse_resume(resume_path)
     original_text = parsed.get("text", "")
-    original_document = build_resume_document(original_text)
+    original_document = (
+        ResumeDocument(**parsed["document"])
+        if parsed.get("document")
+        else build_resume_document(original_text)
+    )
 
     suggestion_result = apply_suggestions_to_document(original_document, suggestions_text)
     updated_document = suggestion_result["document"]
@@ -27,7 +36,7 @@ def apply_suggestion_pipeline(resume_path: str, suggestions_text: str) -> Pipeli
 
     current_readiness = calculate_application_readiness(original_text, "")
     projected_readiness = calculate_application_readiness(updated_text, "")
-    updated_resume_skills = extract_resume_skills(updated_text)
+    updated_resume_skills = extract_resume_skills_from_document(updated_document.model_dump()) or extract_resume_skills(updated_text)
     top_skills = updated_resume_skills[:8]
     requested_skills = suggestion_result.get("requested_skills", [])
     remaining_skills = suggestion_result.get("remaining_skills", [])

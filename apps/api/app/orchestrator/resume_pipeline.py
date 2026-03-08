@@ -11,7 +11,12 @@ from typing import Any, Dict, Optional
 from packages.ai_engine.optimizer import optimize_resume
 from packages.ats_score.scorer import calculate_ats_score
 from packages.diff_engine.diff_engine import generate_diff
-from packages.job_intelligence.extractor import analyze_job_description, extract_resume_skills, keyword_names
+from packages.job_intelligence.extractor import (
+    analyze_job_description,
+    extract_resume_skills,
+    extract_resume_skills_from_document,
+    keyword_names,
+)
 from packages.readiness_score.scorer import calculate_application_readiness
 from packages.resume_formatter.builder import build_resume_document
 from packages.resume_parser.parser import parse_resume
@@ -31,7 +36,13 @@ def analyze_resume(parsed_resume: Dict[str, Any], job_description: Optional[str]
     job_intelligence = analyze_job_description(job_description or "")
     job_skills = job_intelligence.get("skills", [])
     role_type = job_intelligence.get("role_type", {"id": "general_software", "label": "Software Engineer"})
-    resume_skill_names = set(keyword_names(extract_resume_skills(resume_text)))
+    resume_document = parsed_resume.get("document") or {}
+    resume_skills = (
+        extract_resume_skills_from_document(resume_document)
+        if resume_document
+        else extract_resume_skills(resume_text)
+    )
+    resume_skill_names = set(keyword_names(resume_skills))
 
     matched_skills = [skill for skill in job_skills if skill["name"] in resume_skill_names]
     missing_skills = [skill for skill in job_skills if skill["name"] not in resume_skill_names]
@@ -69,7 +80,11 @@ def analyze_resume(parsed_resume: Dict[str, Any], job_description: Optional[str]
     }
 
 
-def run_resume_pipeline(resume_path: str, job_description: Optional[str] = None) -> PipelineResult:
+def run_resume_pipeline(
+    resume_path: str,
+    job_description: Optional[str] = None,
+    parsed_resume: Dict[str, Any] | None = None,
+) -> PipelineResult:
     """
     Execute the resume optimization pipeline and return structured results.
 
@@ -78,7 +93,7 @@ def run_resume_pipeline(resume_path: str, job_description: Optional[str] = None)
         job_description: Optional job description text for alignment.
     """
     logger.info("Running resume pipeline for path=%s", resume_path)
-    parsed = parse_resume(resume_path)
+    parsed = parsed_resume or parse_resume(resume_path)
     original_text = parsed.get("text", "")
 
     analysis = analyze_resume(parsed, job_description)

@@ -121,7 +121,7 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
     body_style = ParagraphStyle(
         "ResumeBody",
         parent=styles["BodyText"],
-        fontName="Times-Roman",
+        fontName="Helvetica",
         fontSize=base_font,
         leading=12 if compact else 13,
         spaceAfter=2,
@@ -130,7 +130,7 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
     name_style = ParagraphStyle(
         "ResumeName",
         parent=styles["Heading1"],
-        fontName="Times-Bold",
+        fontName="Helvetica-Bold",
         fontSize=19 if compact else 21,
         leading=22 if compact else 24,
         alignment=TA_CENTER,
@@ -139,7 +139,7 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
     title_style = ParagraphStyle(
         "ResumeTitle",
         parent=body_style,
-        fontName="Times-Italic",
+        fontName="Helvetica-Oblique",
         fontSize=11.3 if compact else 11.8,
         leading=13,
         alignment=TA_CENTER,
@@ -154,14 +154,14 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
     summary_style = ParagraphStyle(
         "ResumeSummary",
         parent=body_style,
-        fontName="Times-Italic",
+        fontName="Helvetica-Oblique",
         alignment=TA_CENTER,
         spaceAfter=section_gap,
     )
     section_style = ParagraphStyle(
         "ResumeSection",
         parent=styles["Heading2"],
-        fontName="Times-Bold",
+        fontName="Helvetica-Bold",
         fontSize=13.5 if compact else 14.5,
         leading=16,
         spaceBefore=section_gap,

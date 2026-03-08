@@ -1,6 +1,7 @@
 """Postgres-backed persistence for job imports and resume pipeline runs."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
@@ -29,6 +30,24 @@ CREATE TABLE IF NOT EXISTS job_cache (
     expires_at TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS parsed_resumes (
+    id SERIAL PRIMARY KEY,
+    source_file_name TEXT,
+    source_file_hash TEXT,
+    source_format TEXT,
+    parser_mode TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    structured_resume JSONB NOT NULL,
+    section_summary JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(content_hash, parser_version)
+);
+
+ALTER TABLE parsed_resumes
+ADD COLUMN IF NOT EXISTS source_file_hash TEXT;
+
 CREATE TABLE IF NOT EXISTS resume_analysis (
     id SERIAL PRIMARY KEY,
     job_id INTEGER REFERENCES job_cache(id) ON DELETE SET NULL,
@@ -40,6 +59,9 @@ CREATE TABLE IF NOT EXISTS resume_analysis (
     suggestions JSONB,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+ALTER TABLE resume_analysis
+ADD COLUMN IF NOT EXISTS parsed_resume_id INTEGER;
 
 CREATE TABLE IF NOT EXISTS optimized_resumes (
     id SERIAL PRIMARY KEY,
@@ -53,11 +75,37 @@ CREATE TABLE IF NOT EXISTS optimized_resumes (
 CREATE INDEX IF NOT EXISTS idx_job_cache_expires_at
 ON job_cache(expires_at);
 
+CREATE INDEX IF NOT EXISTS idx_parsed_resumes_content_hash
+ON parsed_resumes(content_hash);
+
+CREATE INDEX IF NOT EXISTS idx_parsed_resumes_source_file_hash
+ON parsed_resumes(source_file_hash);
+
 CREATE INDEX IF NOT EXISTS idx_resume_analysis_job_id
 ON resume_analysis(job_id);
 
+CREATE INDEX IF NOT EXISTS idx_resume_analysis_parsed_resume_id
+ON resume_analysis(parsed_resume_id);
+
 CREATE INDEX IF NOT EXISTS idx_optimized_resumes_analysis_id
 ON optimized_resumes(analysis_id);
+"""
+
+_PARSED_RESUME_FK_SQL = """
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_resume_analysis_parsed_resume'
+    ) THEN
+        ALTER TABLE resume_analysis
+        ADD CONSTRAINT fk_resume_analysis_parsed_resume
+        FOREIGN KEY (parsed_resume_id)
+        REFERENCES parsed_resumes(id)
+        ON DELETE SET NULL;
+    END IF;
+END $$;
 """
 
 
@@ -73,6 +121,7 @@ def ensure_schema(database_url: str | None) -> None:
                 connection.rollback()
                 logger.warning("Could not enable pg_trgm extension: %s", exc)
             cursor.execute(_SCHEMA_SQL)
+            cursor.execute(_PARSED_RESUME_FK_SQL)
         connection.commit()
 
 
@@ -127,6 +176,49 @@ def get_cached_job_id(database_url: str | None, url: str | None) -> int | None:
             row = cursor.fetchone()
 
     return int(row[0]) if row else None
+
+
+def get_parsed_resume_by_source_hash(
+    database_url: str | None,
+    source_file_hash: str | None,
+    parser_version: str | None = None,
+) -> Dict[str, Any] | None:
+    if not database_url or not source_file_hash:
+        return None
+
+    version = parser_version or "layout_v1"
+    with connect(database_url, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, source_file_name, source_file_hash, source_format, parser_mode,
+                       parser_version, normalized_text, structured_resume, section_summary
+                FROM parsed_resumes
+                WHERE source_file_hash = %s
+                  AND parser_version = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (source_file_hash, version),
+            )
+            row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "id": row["id"],
+        "file_name": row.get("source_file_name") or "resume",
+        "text": row.get("normalized_text") or "",
+        "sections": row.get("section_summary") or [],
+        "document": row.get("structured_resume") or {},
+        "metadata": {
+            "format": row.get("source_format") or "",
+            "parser_mode": row.get("parser_mode") or "layout_aware",
+            "parser_version": row.get("parser_version") or version,
+            "source_file_hash": row.get("source_file_hash") or source_file_hash,
+        },
+    }
 
 
 def upsert_cached_job(
@@ -201,6 +293,7 @@ def persist_pipeline_result(
 
     job_id = get_cached_job_id(database_url, job_url)
     parsed_text = result.parsed.get("text", "")
+    parsed_resume_id = upsert_parsed_resume(database_url, result.parsed)
     analysis = result.analysis
     optimized = result.optimized
     readiness = result.application_readiness
@@ -222,12 +315,13 @@ def persist_pipeline_result(
             cursor.execute(
                 """
                 INSERT INTO resume_analysis (
-                    job_id, resume_text, match_score, missing_skills, strengths, weaknesses, suggestions
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    job_id, parsed_resume_id, resume_text, match_score, missing_skills, strengths, weaknesses, suggestions
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     job_id,
+                    parsed_resume_id,
                     parsed_text,
                     match_score,
                     Jsonb(missing_skills),
@@ -257,7 +351,65 @@ def persist_pipeline_result(
             optimized_id = int(optimized_row[0])
         connection.commit()
 
-    return {"analysis_id": analysis_id, "optimized_resume_id": optimized_id}
+    return {
+        "parsed_resume_id": parsed_resume_id or 0,
+        "analysis_id": analysis_id,
+        "optimized_resume_id": optimized_id,
+    }
+
+
+def upsert_parsed_resume(database_url: str | None, parsed: Dict[str, Any]) -> int | None:
+    if not database_url:
+        return None
+
+    normalized_text = str(parsed.get("text", "") or "").strip()
+    document = parsed.get("document") or {}
+    metadata = parsed.get("metadata") or {}
+    sections = parsed.get("sections") or []
+    parser_version = str(metadata.get("parser_version") or "layout_v1")
+    content_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+
+    with connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO parsed_resumes (
+                    source_file_name,
+                    source_file_hash,
+                    source_format,
+                    parser_mode,
+                    parser_version,
+                    content_hash,
+                    normalized_text,
+                    structured_resume,
+                    section_summary
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT(content_hash, parser_version) DO UPDATE SET
+                    source_file_name = EXCLUDED.source_file_name,
+                    source_file_hash = EXCLUDED.source_file_hash,
+                    source_format = EXCLUDED.source_format,
+                    parser_mode = EXCLUDED.parser_mode,
+                    normalized_text = EXCLUDED.normalized_text,
+                    structured_resume = EXCLUDED.structured_resume,
+                    section_summary = EXCLUDED.section_summary
+                RETURNING id
+                """,
+                (
+                    parsed.get("file_name"),
+                    metadata.get("source_file_hash"),
+                    metadata.get("format"),
+                    metadata.get("parser_mode") or "layout_aware",
+                    parser_version,
+                    content_hash,
+                    normalized_text,
+                    Jsonb(document),
+                    Jsonb(sections),
+                ),
+            )
+            row = cursor.fetchone()
+        connection.commit()
+
+    return int(row[0]) if row else None
 
 
 def _skill_names(items: Any) -> list[str]:
