@@ -179,11 +179,11 @@ def _rewrite_known_bullet(entry: ResumeExperienceItem, bullet: str) -> str:
         if "go" in lowered:
             return (
                 "Designed checkpoint-based execution control and resume mechanisms in Go, enabling resilient "
-                "execution under heavy parallel workloads."
+                "execution across high-concurrency workloads."
             )
         return (
             "Designed checkpoint-based execution control and resume mechanisms, enabling resilient execution "
-            "under heavy parallel workloads."
+            "across high-concurrency workloads."
         )
 
     if any(token in lowered for token in ("workload sharding", "parallel execution", "sql indexing")) and any(
@@ -197,7 +197,7 @@ def _rewrite_known_bullet(entry: ResumeExperienceItem, bullet: str) -> str:
     if "deadlock" in lowered or "write contention" in lowered:
         return (
             "Resolved database deadlocks and write contention under high concurrency by redesigning indexing strategy "
-            "and optimizing transactional boundaries."
+            "and transaction boundaries."
         )
 
     if any(token in lowered for token in ("cloudwatch", "failure-recovery", "retry", "observability")):
@@ -213,13 +213,15 @@ def _rewrite_known_bullet(entry: ResumeExperienceItem, bullet: str) -> str:
         )
 
     if any(token in lowered for token in ("evaluation pipeline", "manual scoring", "benchmark ai-generated")):
-        return "Designed evaluation pipelines to benchmark AI-generated outputs against manual scoring frameworks."
+        return "Designed evaluation pipelines to benchmark AI-generated outputs against manual scoring benchmarks."
 
     if "migration" in lowered and any(token in lowered for token in ("maintainability", "deployment efficiency")):
-        return (
-            "Led architectural migration of backend services to a modular microservices platform, improving deployment "
-            "efficiency and system maintainability."
-        )
+        if "backend service" in lowered or "backend systems" in lowered:
+            return (
+                "Led architectural migration of backend services across production systems, improving deployment "
+                "efficiency and maintainability for enterprise clients."
+            )
+        return "Led architectural migration across production systems, improving maintainability and deployment efficiency."
 
     if "ci/cd" in lowered and "40%" in lowered:
         return "Automated CI/CD workflows, reducing deployment effort by 40%."

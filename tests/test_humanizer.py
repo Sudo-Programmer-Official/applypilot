@@ -30,7 +30,23 @@ class HumanizerTests(unittest.TestCase):
         self.assertEqual(changes, 2)
         self.assertIn("workload sharding, parallel execution, and SQL indexing optimization", document.experience[0].bullets[0])
         self.assertNotIn("Machine Learning", document.experience[0].bullets[0])
-        self.assertIn("transactional boundaries", document.experience[0].bullets[1])
+        self.assertIn("transaction boundaries", document.experience[0].bullets[1])
+
+    def test_humanizer_uses_high_concurrency_wording_for_checkpoint_bullets(self) -> None:
+        document = build_resume_document(
+            "\n".join(
+                [
+                    "ABHISHEK JHA",
+                    "Experience",
+                    "Software Engineering Intern - Braintree Health May 2025 - Aug 2025",
+                    "- Designed checkpoint-based execution control and resume mechanisms in Go, enabling resilient execution under heavy parallel workloads.",
+                ]
+            )
+        )
+
+        rewritten = humanize_bullet(document.experience[0], document.experience[0].bullets[0], {"Go"}, set())
+
+        self.assertIn("high-concurrency workloads", rewritten)
 
     def test_humanize_bullet_removes_repeated_filler(self) -> None:
         document = build_resume_document(

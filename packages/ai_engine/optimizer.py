@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 from packages.ai_engine.humanizer import humanize_experience_bullets
 from packages.job_intelligence.extractor import analyze_job_description, extract_resume_skills_from_document, keyword_names
@@ -28,6 +28,39 @@ _SUMMARY_FOCUS = {
     "frontend engineer": "product-facing interfaces, performance, and cross-functional delivery",
     "devops engineer": "platform reliability, cloud infrastructure, and deployment automation",
 }
+
+_BACKEND_SKILL_ORDER = [
+    "Languages",
+    "Backend & Distributed Systems",
+    "Databases",
+    "Cloud & Infrastructure",
+    "Systems Engineering",
+    "Core CS",
+    "Frameworks",
+    "AI & Machine Learning",
+    "Data Engineering",
+    "Technical Skills",
+]
+
+_GENERIC_SKILL_ORDER = [
+    "Languages",
+    "Frameworks",
+    "Backend & Distributed Systems",
+    "Databases",
+    "Cloud & Infrastructure",
+    "Systems Engineering",
+    "Core CS",
+    "Data Engineering",
+    "AI & Machine Learning",
+    "Technical Skills",
+]
+
+_SUMMARY_GENERIC_PATTERNS = (
+    "experienced in scalable",
+    "service reliability",
+    "measurable impact",
+    "production reliability",
+)
 
 
 def optimize_resume(
@@ -56,13 +89,14 @@ def optimize_resume(
 
     optimized = document.model_copy(deep=True)
     _rewrite_title(optimized, role_info)
-    _rewrite_summary(optimized, role_info, job_skill_names)
+    summary_action = _rewrite_summary(optimized, role_info, job_skill_names)
     added_skills = _add_missing_skills(optimized, missing_skills[:2])
+    _reorder_skill_sections(optimized, role_info)
     bullet_changes = humanize_experience_bullets(optimized)
     project_changes = _rewrite_projects(optimized)
 
     optimized_text = resume_document_to_text(optimized)
-    suggestions = _build_suggestions(added_skills, bullet_changes, project_changes, role_info)
+    suggestions = _build_suggestions(added_skills, bullet_changes, project_changes, role_info, summary_action)
 
     return {
         "optimized_text": optimized_text,
@@ -114,13 +148,17 @@ def _rewrite_title(document: ResumeDocument, role_info: Dict[str, str]) -> None:
         document.title = f"{primary} | {role_label}"
 
 
-def _rewrite_summary(document: ResumeDocument, role_info: Dict[str, str], job_skill_names: List[str]) -> None:
+def _rewrite_summary(document: ResumeDocument, role_info: Dict[str, str], job_skill_names: List[str]) -> str:
+    original_summary = _clean_text(document.summary or "")
     role_label = (role_info.get("label") or document.title or "Software Engineer").split("|", 1)[0].strip()
-    focus = _SUMMARY_FOCUS.get(role_label.lower(), "scalable systems, measurable impact, and production reliability")
-    skill_focus = ", ".join(job_skill_names[:3])
-    if skill_focus:
-        focus = f"{focus}, with emphasis on {skill_focus}"
-    document.summary = f"{role_label} experienced in {focus}."
+    generated_summary = _build_summary(role_label, job_skill_names)
+
+    if original_summary and _summary_score(original_summary) >= _summary_score(generated_summary):
+        document.summary = _finalize_summary(original_summary)
+        return "preserved"
+
+    document.summary = generated_summary
+    return "rewritten" if original_summary else "created"
 
 
 def _add_missing_skills(document: ResumeDocument, missing_skills: List[Dict[str, Any]]) -> List[str]:
@@ -155,6 +193,20 @@ def _pick_skill_category(document: ResumeDocument, category: str) -> str:
     return preferred
 
 
+def _reorder_skill_sections(document: ResumeDocument, role_info: Dict[str, str]) -> None:
+    if not document.skills:
+        return
+
+    role_lower = (role_info.get("label") or "").lower()
+    preferred_order = _BACKEND_SKILL_ORDER if any(
+        token in role_lower for token in ("backend", "distributed", "platform", "devops")
+    ) else _GENERIC_SKILL_ORDER
+
+    indexed_items = list(enumerate(document.skills.items()))
+    indexed_items.sort(key=lambda item: (_skill_order_index(item[1][0], preferred_order), item[0]))
+    document.skills = {category: values for _, (category, values) in indexed_items}
+
+
 def _rewrite_projects(document: ResumeDocument) -> int:
     changes = 0
     for entry in document.projects:
@@ -177,8 +229,14 @@ def _build_suggestions(
     bullet_changes: int,
     project_changes: int,
     role_info: Dict[str, str],
+    summary_action: str,
 ) -> List[str]:
-    suggestions = [f"Aligned the summary to {role_info.get('label', 'the target role')} language."]
+    if summary_action == "preserved":
+        suggestions = ["Kept the original summary because it was already stronger than the generated rewrite."]
+    elif summary_action == "created":
+        suggestions = [f"Created a role-aligned summary for {role_info.get('label', 'the target role')}."]
+    else:
+        suggestions = [f"Aligned the summary to {role_info.get('label', 'the target role')} language."]
     if added_skills:
         suggestions.append(f"Added missing role keywords to skills: {', '.join(added_skills[:2])}.")
     if bullet_changes:
@@ -186,6 +244,42 @@ def _build_suggestions(
     if project_changes:
         suggestions.append("Cleaned project descriptions to preserve readability in the final PDF.")
     return suggestions[:4]
+
+
+def _build_summary(role_label: str, job_skill_names: List[str]) -> str:
+    focus = _SUMMARY_FOCUS.get(role_label.lower(), "scalable systems, measurable impact, and production reliability")
+    lead_skills = ", ".join(job_skill_names[:3])
+    if lead_skills:
+        return f"{role_label} building {focus} across {lead_skills}."
+    return f"{role_label} building {focus}."
+
+
+def _summary_score(summary: str) -> int:
+    lowered = summary.lower()
+    metrics = len(re.findall(r"\b\d+(?:\.\d+)?\s?(?:%|m\+|k\+|records?|workers?|hours?)\b", lowered))
+    technical_signals = len(re.findall(
+        r"\b(?:distributed|fault-tolerant|scalable|concurrency|cloud|backend|lambda|rds|microservices|systems?)\b",
+        lowered,
+    ))
+    generic_hits = sum(1 for pattern in _SUMMARY_GENERIC_PATTERNS if pattern in lowered)
+    sentence_length_bonus = 1 if 10 <= len(summary.split()) <= 24 else 0
+    return metrics * 3 + technical_signals + sentence_length_bonus - generic_hits
+
+
+def _finalize_summary(summary: str) -> str:
+    cleaned = _clean_text(summary).rstrip(".")
+    return f"{cleaned}."
+
+
+def _skill_order_index(category: str, preferred_order: List[str]) -> Tuple[int, str]:
+    normalized = category.lower()
+    for index, preferred in enumerate(preferred_order):
+        preferred_lower = preferred.lower()
+        if normalized == preferred_lower:
+            return index, normalized
+        if preferred_lower in normalized or normalized in preferred_lower:
+            return index, normalized
+    return len(preferred_order), normalized
 
 
 def _clean_terminal(text: str) -> str:

@@ -43,16 +43,17 @@ const emit = defineEmits<{
 
       <div class="metric-cluster">
         <div class="metric-card">
-          <span>Readiness</span>
-          <strong>{{ displayedReadiness }}</strong>
+          <span>Match score</span>
+          <strong>{{ displayedReadiness }}%</strong>
+          <small>+{{ readinessDelta }} from original</small>
         </div>
         <div class="metric-card">
-          <span>ATS Score</span>
-          <strong>{{ displayedAts }}</strong>
+          <span>ATS compatibility</span>
+          <strong>{{ displayedAts }}%</strong>
         </div>
         <div class="metric-card">
-          <span>Delta</span>
-          <strong>+{{ readinessDelta }}</strong>
+          <span>Improvements applied</span>
+          <strong>{{ (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</strong>
         </div>
       </div>
     </div>
@@ -147,7 +148,7 @@ const emit = defineEmits<{
     <div class="detail-grid">
       <article class="detail-card">
         <div class="card-head">
-          <h4>Changes applied</h4>
+          <h4>Why these changes</h4>
           <span>{{ (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</span>
         </div>
         <ul class="change-list">
@@ -159,12 +160,13 @@ const emit = defineEmits<{
 
       <article class="detail-card">
         <div class="card-head">
-          <h4>Diff highlights</h4>
+          <h4>Change highlights</h4>
           <span>{{ diffLines.length }}</span>
         </div>
         <div v-if="diffLines.length" class="diff-list">
           <div v-for="(line, index) in diffLines" :key="`${line.type}-${index}`" class="diff-line" :data-type="line.type">
-            <code>{{ line.value }}</code>
+            <span class="diff-label">{{ line.type === 'add' ? 'Added' : 'Removed' }}</span>
+            <code>{{ line.value.slice(1).trim() }}</code>
           </div>
         </div>
         <p v-else class="empty-copy">No line-level diff was generated for this run.</p>
@@ -253,6 +255,13 @@ h3 {
   font-size: 1.9rem;
 }
 
+.metric-card small {
+  display: block;
+  margin-top: 6px;
+  color: #5f6c80;
+  font-size: 0.8rem;
+}
+
 .action-row {
   display: flex;
   flex-wrap: wrap;
@@ -318,6 +327,9 @@ button:disabled {
 
 .preview-card,
 .detail-card {
+  width: 100%;
+  max-width: 980px;
+  justify-self: center;
   padding: 22px;
   border: 1px solid rgba(20, 33, 61, 0.12);
   border-radius: 24px;
@@ -353,15 +365,17 @@ button:disabled {
 }
 
 .preview-frame-wrap {
-  margin-top: 14px;
+  margin: 18px auto 0;
+  max-width: 920px;
 }
 
 .preview-frame {
   width: 100%;
-  height: 820px;
+  height: 1120px;
   border: 1px solid rgba(20, 33, 61, 0.12);
   border-radius: 20px;
   background: #fff;
+  box-shadow: 0 16px 34px rgba(20, 33, 61, 0.12);
 }
 
 .spinner {
@@ -447,6 +461,8 @@ button:disabled {
 }
 
 .diff-line {
+  display: grid;
+  gap: 6px;
   padding: 12px 14px;
   border-radius: 16px;
   background: rgba(20, 33, 61, 0.05);
@@ -463,6 +479,14 @@ button:disabled {
 .diff-line code {
   font-size: 0.86rem;
   white-space: pre-wrap;
+}
+
+.diff-label {
+  color: #14213d;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 @keyframes spin {
@@ -488,7 +512,7 @@ button:disabled {
   }
 
   .preview-frame {
-    height: 640px;
+    height: 700px;
   }
 
   .comparison-columns {

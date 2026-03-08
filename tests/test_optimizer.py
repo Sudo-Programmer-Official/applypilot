@@ -8,6 +8,67 @@ from packages.shared_types.resume_document import ResumeDocument
 
 
 class ResumeOptimizerTests(unittest.TestCase):
+    def test_optimizer_keeps_strong_original_summary(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Distributed Systems Engineer | Cloud Data Infrastructure & Scalable Platforms",
+                "Distributed systems engineer designing fault-tolerant, horizontally scalable data platforms processing 10M+ records across high-concurrency cloud workloads.",
+                "Experience",
+                "Software Engineering Intern - Braintree Health May 2025 - Aug 2025",
+                "- Architected distributed backend services on AWS Lambda and RDS to process 11M+ records across 30-40 concurrent workers with fault-tolerant orchestration.",
+            ]
+        )
+        document = build_resume_document(resume_text)
+
+        optimized = optimize_resume(
+            resume_text,
+            "Senior Backend Engineer\nRequirements:\n- AWS\n- Distributed Systems\n- CI/CD",
+            resume_document=document,
+        )
+
+        optimized_document = ResumeDocument.model_validate(optimized["optimized_document"])
+
+        self.assertRegex(optimized_document.summary, r"10\s?M\+\srecords")
+        self.assertIn("fault-tolerant", optimized_document.summary.lower())
+        self.assertNotIn("experienced in scalable backend systems", optimized_document.summary.lower())
+
+    def test_optimizer_reorders_skills_for_backend_roles(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Software Engineer",
+                "Technical Skills",
+                "Cloud & Infrastructure: AWS, Docker",
+                "Systems Engineering: Fault Tolerance",
+                "Languages: Python, Java",
+                "Databases: PostgreSQL",
+                "Backend & Distributed Systems: REST APIs, Microservices",
+                "Experience",
+                "Software Engineer - Example Corp Jan 2022 - Present",
+                "- Built backend systems.",
+            ]
+        )
+        document = build_resume_document(resume_text)
+
+        optimized = optimize_resume(
+            resume_text,
+            "Backend Engineer\nRequirements:\n- Python\n- AWS\n- PostgreSQL\n- Microservices",
+            resume_document=document,
+        )
+
+        optimized_document = ResumeDocument.model_validate(optimized["optimized_document"])
+        self.assertEqual(
+            list(optimized_document.skills.keys())[:5],
+            [
+                "Languages",
+                "Backend & Distributed Systems",
+                "Databases",
+                "Cloud & Infrastructure",
+                "Systems Engineering",
+            ],
+        )
+
     def test_optimizer_preserves_experience_entries_and_avoids_reliability_filler(self) -> None:
         resume_text = "\n".join(
             [
