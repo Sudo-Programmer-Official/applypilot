@@ -112,6 +112,28 @@ class ResumeBuilderTests(unittest.TestCase):
         self.assertIn("Monitoring", values)
         self.assertNotIn("Core Skills", document.skills)
 
+    def test_merges_wrapped_experience_bullets(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Experience",
+                "Software Engineering Intern - Braintree Health May 2025 - Aug 2025",
+                "- Architected high-scale distributed backend services using AWS Lambda and RDS to process 11M+ records across",
+                "30-40 concurrent workers with fault-tolerant orchestration.",
+                "- Designed checkpoint-based execution control and indexed resume mechanisms enabling resilient, high-availability",
+                "execution under heavy parallel workloads.",
+                "Software Engineer - Accenture Jul 2019 - Nov 2021",
+                "- Delivered enterprise software modules within cross-functional Agile teams.",
+            ]
+        )
+
+        document = build_resume_document(resume_text)
+
+        self.assertEqual(len(document.experience), 2)
+        self.assertEqual(len(document.experience[0].bullets), 2)
+        self.assertIn("30-40 concurrent workers", document.experience[0].bullets[0])
+        self.assertIn("execution under heavy parallel workloads", document.experience[0].bullets[1])
+
 
 class ResumeParserTests(unittest.TestCase):
     def test_parse_docx_fixture_preserves_structure(self) -> None:

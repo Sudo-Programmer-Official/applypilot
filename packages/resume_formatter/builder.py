@@ -345,11 +345,33 @@ def _should_join_skill_fragments(previous: str, current: str) -> bool:
     return len(prev) <= 10 and len(curr) <= 10
 
 
+def _should_merge_bullet_continuation(line: str) -> bool:
+    if not line:
+        return False
+    if _DATE_PATTERN.search(line):
+        return False
+    if _section_key(line):
+        return False
+    if any(separator in line for separator in (" @ ", " | ", " – ", " - ", " -- ")):
+        return False
+    first_char = line[0]
+    if first_char.islower() or first_char.isdigit():
+        return True
+    return len(line.split()) >= 7
+
+
+def _merge_wrapped_text(previous: str, current: str) -> str:
+    if previous.rstrip().endswith("-") and current[:1].islower():
+        return _clean_text(f"{previous.rstrip()[:-1]}{current}")
+    return _clean_text(f"{previous} {current}")
+
+
 def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
     entries: List[ResumeExperienceItem] = []
     current: ResumeExperienceItem | None = None
 
     for line in lines:
+        cleaned_line = _clean_text(line)
         bullet = _strip_bullet(line)
         if bullet:
             if current is None:
@@ -359,8 +381,12 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
             current.bullets = current.bullets[:4]
             continue
 
+        if current and current.bullets and _should_merge_bullet_continuation(cleaned_line):
+            current.bullets[-1] = _merge_wrapped_text(current.bullets[-1], cleaned_line)
+            continue
+
         if current and current.bullets:
-            role, company, date, start_date, end_date = _parse_role_company_date(line)
+            role, company, date, start_date, end_date = _parse_role_company_date(cleaned_line)
             if role or company or date:
                 current = ResumeExperienceItem(
                     role=role,
@@ -373,7 +399,7 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
                 entries.append(current)
                 continue
 
-        role, company, date, start_date, end_date = _parse_role_company_date(line)
+        role, company, date, start_date, end_date = _parse_role_company_date(cleaned_line)
         if role or company or date:
             current = ResumeExperienceItem(
                 role=role,
@@ -387,14 +413,14 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
             continue
 
         if current is None:
-            current = ResumeExperienceItem(role=_clean_text(line), company="", date="", start_date="", end_date="", bullets=[])
+            current = ResumeExperienceItem(role=cleaned_line, company="", date="", start_date="", end_date="", bullets=[])
             entries.append(current)
             continue
 
         if current.company:
-            current.company = _clean_text(f"{current.company} {line}".strip())
+            current.company = _clean_text(f"{current.company} {cleaned_line}".strip())
         else:
-            current.company = _clean_text(line)
+            current.company = cleaned_line
 
     return [entry for entry in entries if entry.role or entry.company or entry.bullets]
 
@@ -404,6 +430,7 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
     current: ResumeProjectItem | None = None
 
     for line in lines:
+        cleaned_line = _clean_text(line)
         bullet = _strip_bullet(line)
         if bullet:
             if current is None:
@@ -413,8 +440,12 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
             current.bullets = current.bullets[:3]
             continue
 
-        if ":" in line:
-            name, details = _split_once(line, ":")
+        if current and current.bullets and _should_merge_bullet_continuation(cleaned_line):
+            current.bullets[-1] = _merge_wrapped_text(current.bullets[-1], cleaned_line)
+            continue
+
+        if ":" in cleaned_line:
+            name, details = _split_once(cleaned_line, ":")
             current = ResumeProjectItem(
                 name=name or "Project",
                 details=_clean_text(details),
@@ -423,7 +454,7 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
             entries.append(current)
             continue
 
-        current = ResumeProjectItem(name=_clean_text(line), details="", bullets=[])
+        current = ResumeProjectItem(name=cleaned_line, details="", bullets=[])
         entries.append(current)
 
     return entries[:3]

@@ -18,9 +18,10 @@ from packages.job_intelligence.extractor import (
     keyword_names,
 )
 from packages.readiness_score.scorer import calculate_application_readiness
-from packages.resume_formatter.builder import build_resume_document
+from packages.resume_formatter import build_resume_document, resume_document_to_text
 from packages.resume_parser.parser import parse_resume
 from packages.shared_types.pipeline_result import PipelineResult
+from packages.shared_types.resume_document import ResumeDocument
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,17 @@ def run_resume_pipeline(
     """
     logger.info("Running resume pipeline for path=%s", resume_path)
     parsed = parsed_resume or parse_resume(resume_path)
-    original_text = parsed.get("text", "")
+    original_document = (
+        ResumeDocument(**parsed["document"])
+        if parsed.get("document")
+        else build_resume_document(parsed.get("text", ""))
+    )
+    original_text = resume_document_to_text(original_document)
+    parsed = {
+        **parsed,
+        "text": original_text,
+        "document": original_document.model_dump(),
+    }
 
     analysis = analyze_resume(parsed, job_description)
     optimized = optimize_resume(original_text, job_description or "")
