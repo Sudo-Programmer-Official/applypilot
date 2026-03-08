@@ -21,12 +21,6 @@
           <RouterLink class="nav-link" to="/dashboard/history">History</RouterLink>
           <RouterLink class="nav-link subtle" to="/">Landing</RouterLink>
         </nav>
-
-        <div class="meta-links">
-          <span class="mode-pill">Guest mode</span>
-          <RouterLink class="meta-link" to="/privacy">Privacy</RouterLink>
-          <RouterLink class="meta-link" to="/terms">Terms</RouterLink>
-        </div>
       </div>
     </div>
   </header>
@@ -122,31 +116,6 @@
   color: #8b5e34;
 }
 
-.meta-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.mode-pill,
-.meta-link {
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-size: 0.82rem;
-}
-
-.mode-pill {
-  color: #124084;
-  font-weight: 700;
-  background: rgba(219, 234, 254, 0.9);
-}
-
-.meta-link {
-  color: #6b7280;
-  background: rgba(255, 255, 255, 0.7);
-}
-
 @media (max-width: 720px) {
   .product-nav-inner {
     flex-direction: column;
@@ -164,16 +133,6 @@
 
   .nav-link {
     flex: 1 1 calc(50% - 10px);
-    text-align: center;
-  }
-
-  .meta-links {
-    justify-content: stretch;
-  }
-
-  .mode-pill,
-  .meta-link {
-    flex: 1 1 calc(33.333% - 10px);
     text-align: center;
   }
 }
