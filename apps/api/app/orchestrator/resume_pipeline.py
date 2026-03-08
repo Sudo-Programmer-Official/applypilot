@@ -108,11 +108,16 @@ def run_resume_pipeline(
     }
 
     analysis = analyze_resume(parsed, job_description)
-    optimized = optimize_resume(original_text, job_description or "")
+    optimized = optimize_resume(original_text, job_description or "", resume_document=original_document)
     optimized_text = optimized.get("optimized_text", original_text)
-    optimized_document = build_resume_document(
-        optimized_text,
-        role_label=analysis.get("role_type", {}).get("label"),
+    optimized_document_payload = optimized.get("optimized_document")
+    optimized_document = (
+        ResumeDocument.model_validate(optimized_document_payload)
+        if optimized_document_payload
+        else build_resume_document(
+            optimized_text,
+            role_label=analysis.get("role_type", {}).get("label"),
+        )
     )
 
     diff_text = generate_diff(original_text, optimized_text)

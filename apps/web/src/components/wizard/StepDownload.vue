@@ -4,49 +4,41 @@ import type { DiffLine, ImportedJob, PipelineResult } from '../../types/wizard'
 const props = defineProps<{
   result: PipelineResult
   roleLabel: string
-  editableResumeText: string
-  isEditingResume: boolean
-  copied: boolean
   downloadingPdf: boolean
   diffLines: DiffLine[]
-  fixApplied: boolean
   displayedReadiness: number
   displayedAts: number
   readinessDelta: number
   importedJob: ImportedJob | null
+  previewPdfUrl: string
+  previewPreparing: boolean
+  previewFailed: boolean
+  previewErrorMessage: string
 }>()
 
 const emit = defineEmits<{
   (e: 'back'): void
-  (e: 'toggle-edit'): void
-  (e: 'copy'): void
   (e: 'download'): void
-  (e: 'restart-job'): void
-  (e: 'restart-resume'): void
-  (e: 'show-original'): void
-  (e: 'update:text', value: string): void
+  (e: 'preview'): void
+  (e: 'regenerate'): void
 }>()
-
-function updateText(event: Event) {
-  const target = event.target as HTMLTextAreaElement
-  emit('update:text', target.value)
-}
 </script>
 
 <template>
   <section class="step-panel">
     <div class="download-hero">
-      <div>
+      <div class="hero-copy-block">
         <p class="step-kicker">Step 5</p>
         <h3>Your optimized resume is ready</h3>
         <p class="hero-copy">
-          Review the final draft, download the ATS-safe PDF, or start another tailoring pass for a different role.
+          Review the PDF output generated from the structured resume document, then download the final ATS-safe file.
         </p>
         <p class="meta-line">Target role: {{ roleLabel }}</p>
         <p v-if="importedJob" class="meta-line">
           {{ importedJob.company }}{{ importedJob.title ? ` • ${importedJob.title}` : '' }}
         </p>
       </div>
+
       <div class="metric-cluster">
         <div class="metric-card">
           <span>Readiness</span>
@@ -63,74 +55,70 @@ function updateText(event: Event) {
       </div>
     </div>
 
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <button class="ghost small" type="button" @click="emit('back')">Back</button>
-        <button class="ghost small" type="button" @click="emit('show-original')">
-          {{ fixApplied ? 'View Original' : 'View Optimized' }}
-        </button>
-      </div>
-      <div class="toolbar-actions">
-        <button class="ghost small" type="button" @click="emit('toggle-edit')">
-          {{ isEditingResume ? 'Preview' : 'Edit' }}
-        </button>
-        <button class="ghost small" type="button" @click="emit('copy')">
-          {{ copied ? 'Copied' : 'Copy' }}
-        </button>
-        <button class="primary small" type="button" :disabled="downloadingPdf" @click="emit('download')">
-          {{ downloadingPdf ? 'Preparing PDF...' : 'Download PDF' }}
-        </button>
-      </div>
+    <div class="action-row">
+      <button class="ghost" type="button" :disabled="previewPreparing || downloadingPdf" @click="emit('back')">Back</button>
+      <button class="ghost" type="button" :disabled="previewPreparing" @click="emit('regenerate')">
+        {{ previewPreparing ? 'Regenerating...' : 'Regenerate' }}
+      </button>
+      <button class="secondary" type="button" :disabled="previewPreparing" @click="emit('preview')">
+        {{ previewPreparing ? 'Preparing Preview...' : 'Preview' }}
+      </button>
+      <button class="primary" type="button" :disabled="downloadingPdf || previewPreparing" @click="emit('download')">
+        {{ downloadingPdf ? 'Preparing PDF...' : 'Download PDF' }}
+      </button>
     </div>
 
-    <div class="content-grid">
-      <article class="resume-card">
-        <div class="card-head">
-          <h4>{{ fixApplied ? 'Optimized Resume Preview' : 'Current Resume Preview' }}</h4>
-          <span>{{ result.parsed.file_name }}</span>
-        </div>
+    <article class="preview-card">
+      <div class="card-head">
+        <h4>PDF Preview</h4>
+        <span>{{ result.parsed.file_name }}</span>
+      </div>
 
-        <textarea
-          v-if="isEditingResume"
-          class="resume-editor"
-          rows="20"
-          :value="editableResumeText"
-          @input="updateText"
-        ></textarea>
-        <pre v-else class="resume-preview">{{ editableResumeText }}</pre>
+      <div v-if="previewPreparing" class="preview-state loading-state">
+        <div class="spinner" aria-hidden="true"></div>
+        <strong>Preparing preview</strong>
+        <p>Generating the PDF preview from the structured resume document.</p>
+      </div>
+
+      <div v-else-if="previewPdfUrl" class="preview-frame-wrap">
+        <iframe class="preview-frame" :src="previewPdfUrl" title="Resume PDF preview"></iframe>
+      </div>
+
+      <div v-else class="preview-state empty-state">
+        <strong>{{ previewFailed ? 'Preview unavailable' : 'Preview not ready' }}</strong>
+        <p>
+          {{ previewFailed
+            ? (previewErrorMessage || 'Preview generation failed. You can still download the PDF directly.')
+            : 'Click Preview to generate the PDF viewer.' }}
+        </p>
+      </div>
+    </article>
+
+    <div class="detail-grid">
+      <article class="detail-card">
+        <div class="card-head">
+          <h4>Changes applied</h4>
+          <span>{{ (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</span>
+        </div>
+        <ul class="change-list">
+          <li v-for="item in result.analysis.applied_changes || result.analysis.suggested_changes || []" :key="item">
+            {{ item }}
+          </li>
+        </ul>
       </article>
 
-      <aside class="side-stack">
-        <article class="side-card">
-          <div class="card-head">
-            <h4>Changes applied</h4>
-            <span>{{ (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</span>
+      <article class="detail-card">
+        <div class="card-head">
+          <h4>Diff highlights</h4>
+          <span>{{ diffLines.length }}</span>
+        </div>
+        <div v-if="diffLines.length" class="diff-list">
+          <div v-for="(line, index) in diffLines" :key="`${line.type}-${index}`" class="diff-line" :data-type="line.type">
+            <code>{{ line.value }}</code>
           </div>
-          <ul class="change-list">
-            <li v-for="item in result.analysis.applied_changes || result.analysis.suggested_changes || []" :key="item">
-              {{ item }}
-            </li>
-          </ul>
-        </article>
-
-        <article class="side-card">
-          <div class="card-head">
-            <h4>Diff highlights</h4>
-            <span>{{ diffLines.length }}</span>
-          </div>
-          <div v-if="diffLines.length" class="diff-list">
-            <div v-for="(line, index) in diffLines" :key="`${line.type}-${index}`" class="diff-line" :data-type="line.type">
-              <code>{{ line.value }}</code>
-            </div>
-          </div>
-          <p v-else class="empty-copy">No line-level diff was generated for this run.</p>
-        </article>
-      </aside>
-    </div>
-
-    <div class="step-actions">
-      <button class="ghost" type="button" @click="emit('restart-job')">Try Another Job</button>
-      <button class="secondary" type="button" @click="emit('restart-resume')">Upload New Resume</button>
+        </div>
+        <p v-else class="empty-copy">No line-level diff was generated for this run.</p>
+      </article>
     </div>
   </section>
 </template>
@@ -169,20 +157,22 @@ h3 {
 .hero-copy,
 .meta-line,
 .empty-copy,
-.change-list li {
+.change-list li,
+.preview-state p {
   margin: 10px 0 0;
   color: #5f6c80;
   line-height: 1.6;
 }
 
-.download-hero,
-.toolbar,
-.card-head,
-.step-actions {
+.download-hero {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
   align-items: start;
+}
+
+.hero-copy-block {
+  max-width: 60ch;
 }
 
 .metric-cluster {
@@ -213,25 +203,55 @@ h3 {
   font-size: 1.9rem;
 }
 
-.toolbar-left,
-.toolbar-actions {
+.action-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  justify-content: center;
+  gap: 12px;
 }
 
-.content-grid {
-  display: grid;
-  grid-template-columns: 1.4fr 0.8fr;
-  gap: 18px;
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.resume-card,
-.side-card {
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.primary {
+  color: #fff;
+  background: linear-gradient(135deg, #14213d, #2563eb);
+}
+
+.secondary {
+  color: #14213d;
+  background: rgba(251, 191, 36, 0.22);
+}
+
+.ghost {
+  color: #14213d;
+  background: rgba(20, 33, 61, 0.08);
+}
+
+.preview-card,
+.detail-card {
   padding: 22px;
   border: 1px solid rgba(20, 33, 61, 0.12);
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.74);
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
 }
 
 .card-head span {
@@ -243,36 +263,42 @@ h3 {
   background: rgba(219, 234, 254, 0.86);
 }
 
-.resume-preview,
-.resume-editor {
-  width: 100%;
-  margin-top: 14px;
-  border: 1px solid rgba(20, 33, 61, 0.12);
-  border-radius: 18px;
-  padding: 18px;
-  font: inherit;
-  color: #14213d;
+.preview-state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-height: 720px;
+  padding: 48px 24px;
+  text-align: center;
+  border: 1px dashed rgba(20, 33, 61, 0.16);
+  border-radius: 20px;
   background: rgba(248, 250, 252, 0.92);
 }
 
-.resume-preview {
-  min-height: 720px;
-  overflow: auto;
-  white-space: pre-wrap;
+.preview-frame-wrap {
+  margin-top: 14px;
 }
 
-.resume-editor {
-  resize: vertical;
+.preview-frame {
+  width: 100%;
+  height: 820px;
+  border: 1px solid rgba(20, 33, 61, 0.12);
+  border-radius: 20px;
+  background: #fff;
 }
 
-.resume-editor:focus {
-  outline: none;
-  border-color: rgba(37, 99, 235, 0.44);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+.spinner {
+  width: 42px;
+  height: 42px;
+  border: 3px solid rgba(20, 33, 61, 0.14);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
 }
 
-.side-stack {
+.detail-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -306,37 +332,10 @@ h3 {
   white-space: pre-wrap;
 }
 
-button {
-  border: none;
-  border-radius: 999px;
-  padding: 12px 18px;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.small {
-  padding: 10px 14px;
-}
-
-.primary {
-  color: #fff;
-  background: linear-gradient(135deg, #14213d, #2563eb);
-}
-
-.secondary {
-  color: #14213d;
-  background: rgba(251, 191, 36, 0.22);
-}
-
-.ghost {
-  color: #14213d;
-  background: rgba(20, 33, 61, 0.08);
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 960px) {
@@ -344,16 +343,18 @@ button:disabled {
     padding: 24px;
   }
 
-  .download-hero,
-  .toolbar,
-  .step-actions {
+  .download-hero {
     flex-direction: column;
   }
 
   .metric-cluster,
-  .content-grid {
+  .detail-grid {
     grid-template-columns: 1fr;
     min-width: 0;
+  }
+
+  .preview-frame {
+    height: 640px;
   }
 }
 </style>

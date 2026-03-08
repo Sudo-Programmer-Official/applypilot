@@ -102,14 +102,18 @@ class ResumeBuilderTests(unittest.TestCase):
                 "Backend & Distributed Systems: Microservices Architecture, REST APIs, Fault Tolerance, Horizontal Scaling, Concur-",
                 "rency, Parallel Processing, CI/CD, Moni-",
                 "toring",
+                "Systems Engineering: Workload Sharding, Distributed Job Orchestration, Performance Optimization, Production Moni,",
+                "toring",
             ]
         )
 
         document = build_resume_document(resume_text)
         values = document.skills["Backend & Distributed Systems"]
+        systems_values = document.skills["Systems Engineering"]
 
         self.assertIn("Concurrency", values)
         self.assertIn("Monitoring", values)
+        self.assertIn("Production Monitoring", systems_values)
         self.assertNotIn("Core Skills", document.skills)
 
     def test_merges_wrapped_experience_bullets(self) -> None:

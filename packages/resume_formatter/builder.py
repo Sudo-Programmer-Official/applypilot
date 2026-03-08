@@ -317,14 +317,18 @@ def _merge_skill_fragments(existing: List[str], incoming: List[str]) -> None:
     if not incoming:
         return
 
-    if existing:
-        previous = existing[-1]
-        first = incoming[0]
-        if _should_join_skill_fragments(previous, first):
-            existing[-1] = _clean_text(f"{previous.rstrip('-')}{first}")
-            incoming = incoming[1:]
+    normalized_incoming: List[str] = []
+    for item in incoming:
+        if normalized_incoming and _should_join_skill_fragments(normalized_incoming[-1], item):
+            normalized_incoming[-1] = _merge_wrapped_text(normalized_incoming[-1], item)
+            continue
+        normalized_incoming.append(_clean_text(item))
 
-    existing.extend(_clean_text(item) for item in incoming)
+    if existing and normalized_incoming and _should_join_skill_fragments(existing[-1], normalized_incoming[0]):
+        existing[-1] = _merge_wrapped_text(existing[-1], normalized_incoming[0])
+        normalized_incoming = normalized_incoming[1:]
+
+    existing.extend(normalized_incoming)
 
 
 def _should_join_skill_fragments(previous: str, current: str) -> bool:
@@ -332,8 +336,11 @@ def _should_join_skill_fragments(previous: str, current: str) -> bool:
     curr = current.strip()
     if not prev or not curr:
         return False
-    if prev.endswith("-"):
+    if prev.endswith("-") or prev.endswith(","):
         return True
+    last_token = prev.split()[-1]
+    if curr[:1].islower() and last_token.isalpha() and curr.replace("/", "").replace("+", "").isalpha():
+        return len(last_token) <= 10 and len(curr) <= 10
     if " " in prev or " " in curr:
         return False
     if not curr[:1].islower():
@@ -363,6 +370,14 @@ def _should_merge_bullet_continuation(line: str) -> bool:
 def _merge_wrapped_text(previous: str, current: str) -> str:
     if previous.rstrip().endswith("-") and current[:1].islower():
         return _clean_text(f"{previous.rstrip()[:-1]}{current}")
+    if previous.rstrip().endswith(",") and current[:1].islower():
+        return _clean_text(f"{previous.rstrip()[:-1]}{current}")
+    if " " in previous.strip() and current[:1].islower():
+        head, tail = previous.rsplit(" ", 1)
+        if tail.isalpha() and len(tail) <= 10 and current.strip().isalpha() and len(current.strip()) <= 10:
+            return _clean_text(f"{head} {tail}{current}")
+    if " " not in previous.strip() and " " not in current.strip() and current[:1].islower():
+        return _clean_text(f"{previous}{current}")
     return _clean_text(f"{previous} {current}")
 
 

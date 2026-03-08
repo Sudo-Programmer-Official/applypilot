@@ -78,15 +78,17 @@ const error = ref('')
 const result = ref<PipelineResult | null>(null)
 const importedJob = ref<ImportedJob | null>(null)
 const editableResumeText = ref('')
-const isEditingResume = ref(false)
-const copied = ref(false)
 const fixApplied = ref(false)
 const downloadingPdf = ref(false)
+const previewPreparing = ref(false)
+const previewFailed = ref(false)
+const previewErrorMessage = ref('')
+const previewPdfUrl = ref('')
+const previewPdfBlob = ref<Blob | null>(null)
 const activeAction = ref<ActionMode>('analyze')
 const loadingStageIndex = ref(0)
 
 let loadingTimer: number | null = null
-let copiedTimer: number | null = null
 
 const uploadedFileName = computed(() => fileInput.value?.name ?? '')
 const uploadedFileSize = computed(() => fileInput.value?.size ?? 0)
@@ -161,9 +163,18 @@ function clearResultState() {
   result.value = null
   fixApplied.value = false
   editableResumeText.value = ''
-  isEditingResume.value = false
-  copied.value = false
-  stopCopiedTicker()
+  revokePreviewPdf()
+  previewPreparing.value = false
+  previewFailed.value = false
+  previewErrorMessage.value = ''
+  previewPdfBlob.value = null
+}
+
+function revokePreviewPdf() {
+  if (previewPdfUrl.value) {
+    URL.revokeObjectURL(previewPdfUrl.value)
+    previewPdfUrl.value = ''
+  }
 }
 
 function startLoadingTicker() {
@@ -182,13 +193,6 @@ function stopLoadingTicker() {
   if (loadingTimer !== null) {
     window.clearInterval(loadingTimer)
     loadingTimer = null
-  }
-}
-
-function stopCopiedTicker() {
-  if (copiedTimer !== null) {
-    window.clearTimeout(copiedTimer)
-    copiedTimer = null
   }
 }
 
@@ -348,24 +352,6 @@ function applyTopIssues() {
   }
   fixApplied.value = true
   editableResumeText.value = result.value.optimized.text ?? result.value.parsed.text ?? ''
-  isEditingResume.value = false
-}
-
-function showOriginalResume() {
-  if (!result.value) {
-    return
-  }
-  fixApplied.value = false
-  editableResumeText.value = result.value.parsed.text ?? ''
-  isEditingResume.value = false
-}
-
-function toggleResumeVersion() {
-  if (fixApplied.value) {
-    showOriginalResume()
-    return
-  }
-  applyTopIssues()
 }
 
 function continueToDownload() {
@@ -376,10 +362,7 @@ function continueToDownload() {
     applyTopIssues()
   }
   currentStep.value = 5
-}
-
-function updateEditableResume(value: string) {
-  editableResumeText.value = value
+  void preparePdfPreview()
 }
 
 function setMode(nextMode: ActionMode) {
@@ -390,46 +373,23 @@ function setMode(nextMode: ActionMode) {
   clearResultState()
 }
 
-async function copyResume() {
-  const text = editableResumeText.value.trim()
-  if (!text) {
+async function downloadResume() {
+  if (!result.value) {
     return
   }
 
-  try {
-    await navigator.clipboard.writeText(text)
-    copied.value = true
-    stopCopiedTicker()
-    copiedTimer = window.setTimeout(() => {
-      copied.value = false
-      copiedTimer = null
-    }, 1600)
-  } catch {
-    error.value = 'Copy failed. Download the optimized resume instead.'
-  }
-}
-
-async function downloadResume() {
-  const text = editableResumeText.value.trim()
-  if (!text) {
+  if (previewPdfBlob.value) {
+    const objectUrl = previewPdfUrl.value || URL.createObjectURL(previewPdfBlob.value)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = fixApplied.value ? 'optimized_resume.pdf' : 'resume_preview.pdf'
+    link.click()
     return
   }
 
   downloadingPdf.value = true
   try {
-    const documentPayload = !isEditingResume.value
-      ? (fixApplied.value ? result.value?.optimized?.document : result.value?.parsed?.document)
-      : undefined
-
-    const response = await axios.post(`${apiBase}/resume/download`, {
-      resume_text: text,
-      document: documentPayload,
-      file_name: result.value?.parsed?.file_name,
-      role_label: roleLabel.value,
-      use_optimized: fixApplied.value,
-    }, {
-      responseType: 'blob',
-    })
+    const response = await axios.post(`${apiBase}/resume/download`, buildPdfPayload(), { responseType: 'blob' })
 
     const blob = new Blob([response.data], { type: 'application/pdf' })
     const objectUrl = URL.createObjectURL(blob)
@@ -454,32 +414,68 @@ async function downloadResume() {
   }
 }
 
-function toggleEdit() {
-  isEditingResume.value = !isEditingResume.value
+function buildPdfPayload() {
+  const documentPayload = fixApplied.value ? result.value?.optimized?.document : result.value?.parsed?.document
+
+  return {
+    resume_text: editableResumeText.value.trim(),
+    document: documentPayload,
+    file_name: result.value?.parsed?.file_name,
+    role_label: roleLabel.value,
+    use_optimized: fixApplied.value,
+  }
 }
 
-function restartForAnotherJob() {
-  clearResultState()
-  importedJob.value = null
-  jobUrl.value = ''
-  jobDescription.value = ''
-  suggestionsText.value = ''
-  mode.value = 'analyze'
-  error.value = ''
-  currentStep.value = 3
+async function preparePdfPreview(force = false) {
+  if (!result.value) {
+    return
+  }
+  if (previewPreparing.value) {
+    return
+  }
+  if (previewPdfUrl.value && !force) {
+    return
+  }
+
+  previewPreparing.value = true
+  previewFailed.value = false
+  previewErrorMessage.value = ''
+  previewPdfBlob.value = null
+  revokePreviewPdf()
+
+  try {
+    const response = await axios.post(`${apiBase}/resume/download`, buildPdfPayload(), { responseType: 'blob' })
+    const blob = new Blob([response.data], { type: 'application/pdf' })
+    previewPdfBlob.value = blob
+    previewPdfUrl.value = URL.createObjectURL(blob)
+  } catch (unknownError: unknown) {
+    previewFailed.value = true
+    if (axios.isAxiosError(unknownError) && unknownError.response?.data instanceof Blob) {
+      try {
+        const errorPayload = JSON.parse(await unknownError.response.data.text())
+        previewErrorMessage.value = String(errorPayload.detail ?? 'Preview generation failed.')
+      } catch {
+        previewErrorMessage.value = 'Preview generation failed.'
+      }
+    } else {
+      previewErrorMessage.value = 'Preview generation failed.'
+    }
+  } finally {
+    previewPreparing.value = false
+  }
 }
 
-function restartWithNewResume() {
-  fileInput.value = null
-  parsedResume.value = null
-  importedJob.value = null
-  jobUrl.value = ''
-  jobDescription.value = ''
-  suggestionsText.value = ''
-  mode.value = 'analyze'
-  error.value = ''
-  clearResultState()
-  currentStep.value = 1
+async function regenerateOptimization() {
+  currentStep.value = 4
+  await runOptimization()
+  if (!result.value) {
+    return
+  }
+  if (!fixApplied.value) {
+    applyTopIssues()
+  }
+  currentStep.value = 5
+  await preparePdfPreview(true)
 }
 
 watch(result, (nextResult) => {
@@ -490,9 +486,6 @@ watch(result, (nextResult) => {
   editableResumeText.value = fixApplied.value
     ? nextResult.optimized.text ?? nextResult.parsed.text ?? ''
     : nextResult.parsed.text ?? ''
-  isEditingResume.value = false
-  copied.value = false
-  stopCopiedTicker()
 })
 
 watch([jobDescription, suggestionsText, jobUrl, mode], () => {
@@ -503,7 +496,7 @@ watch([jobDescription, suggestionsText, jobUrl, mode], () => {
 
 onBeforeUnmount(() => {
   stopLoadingTicker()
-  stopCopiedTicker()
+  revokePreviewPdf()
 })
 </script>
 
@@ -613,24 +606,20 @@ onBeforeUnmount(() => {
         v-else-if="currentStep === 5 && result"
         :result="result"
         :role-label="roleLabel"
-        :editable-resume-text="editableResumeText"
-        :is-editing-resume="isEditingResume"
-        :copied="copied"
         :downloading-pdf="downloadingPdf"
         :diff-lines="diffLines"
-        :fix-applied="fixApplied"
         :displayed-readiness="displayedReadiness"
         :displayed-ats="displayedAts"
         :readiness-delta="readinessDelta"
         :imported-job="importedJob"
+        :preview-pdf-url="previewPdfUrl"
+        :preview-preparing="previewPreparing"
+        :preview-failed="previewFailed"
+        :preview-error-message="previewErrorMessage"
         @back="goToStep(4)"
-        @toggle-edit="toggleEdit"
-        @copy="copyResume"
+        @preview="preparePdfPreview(true)"
         @download="downloadResume"
-        @restart-job="restartForAnotherJob"
-        @restart-resume="restartWithNewResume"
-        @show-original="toggleResumeVersion"
-        @update:text="updateEditableResume"
+        @regenerate="regenerateOptimization"
       />
     </div>
   </section>
