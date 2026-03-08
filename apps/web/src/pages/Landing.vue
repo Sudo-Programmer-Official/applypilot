@@ -6,8 +6,13 @@ import ResumeWizard from '../components/wizard/ResumeWizard.vue'
   <main class="landing-shell">
     <header class="topbar">
       <div class="brand-block">
-        <p class="brand-kicker">ApplyPilot</p>
-        <h1>Optimize every resume with a guided workflow.</h1>
+        <div class="brand-mark-shell">
+          <img class="brand-mark" src="/icons/icon-192x192.png" alt="ApplyPilot logo" width="72" height="72" />
+        </div>
+        <div class="brand-copy">
+          <p class="brand-kicker">ApplyPilot</p>
+          <h1>Optimize every resume with a guided workflow.</h1>
+        </div>
       </div>
       <div class="status-pill">Production pipeline online</div>
     </header>
@@ -74,6 +79,33 @@ import ResumeWizard from '../components/wizard/ResumeWizard.vue'
   justify-content: space-between;
   gap: 18px;
   align-items: end;
+}
+
+.brand-block {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.brand-mark-shell {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(20, 33, 61, 0.1);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 16px 38px rgba(20, 33, 61, 0.08);
+}
+
+.brand-mark {
+  width: 72px;
+  height: 72px;
 }
 
 .brand-kicker,
@@ -173,6 +205,10 @@ h1 {
   .topbar {
     flex-direction: column;
     align-items: start;
+  }
+
+  .brand-block {
+    align-items: flex-start;
   }
 
   .hero-stats {

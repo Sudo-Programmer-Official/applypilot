@@ -30,11 +30,19 @@ function selectStep(stepId: number) {
 <template>
   <div class="stepper-shell">
     <div class="stepper-topline">
-      <div>
-        <p class="stepper-kicker">Resume Optimization Wizard</p>
-        <h2>Step {{ activeStep }} of {{ steps.length }}</h2>
+      <div class="stepper-brand">
+        <div class="stepper-logo-shell">
+          <img class="stepper-logo" src="/icons/icon-96x96.png" alt="ApplyPilot logo" width="44" height="44" />
+        </div>
+        <div>
+          <p class="stepper-kicker">ApplyPilot</p>
+          <h2>Resume Optimization Wizard</h2>
+        </div>
       </div>
-      <strong>{{ progressPercent }}%</strong>
+      <div class="stepper-progress-copy">
+        <strong>{{ progressPercent }}%</strong>
+        <small>Step {{ activeStep }} of {{ steps.length }}</small>
+      </div>
     </div>
 
     <div class="stepper-track" aria-hidden="true">
@@ -82,6 +90,33 @@ function selectStep(stepId: number) {
   align-items: end;
 }
 
+.stepper-brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.stepper-logo-shell {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: 18px;
+  background: rgba(20, 33, 61, 0.06);
+}
+
+.stepper-logo {
+  width: 44px;
+  height: 44px;
+}
+
+.stepper-progress-copy {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
 .stepper-kicker {
   margin: 0 0 6px;
   color: #8b5e34;
@@ -96,6 +131,12 @@ h2 {
   font-size: 1.4rem;
   line-height: 1.05;
   font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+}
+
+.stepper-progress-copy small {
+  color: #5f6c80;
+  font-size: 0.72rem;
+  font-weight: 600;
 }
 
 .stepper-track {
@@ -189,6 +230,10 @@ h2 {
 @media (max-width: 980px) {
   .stepper-shell {
     position: static;
+  }
+
+  .stepper-topline {
+    align-items: start;
   }
 }
 </style>
