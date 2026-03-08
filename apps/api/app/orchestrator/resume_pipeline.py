@@ -8,10 +8,11 @@ phases.
 import logging
 from typing import Any, Dict, Optional
 
-from packages.resume_parser.parser import parse_resume
+from packages.ats_score.scorer import calculate_ats_score
 from packages.ai_engine.optimizer import optimize_resume
 from packages.diff_engine.diff_engine import generate_diff
-from packages.ats_score.scorer import calculate_ats_score
+from packages.keyword_engine.extractor import extract_keywords
+from packages.resume_parser.parser import parse_resume
 from packages.shared_types.pipeline_result import PipelineResult
 
 logger = logging.getLogger(__name__)
@@ -24,10 +25,29 @@ def analyze_resume(parsed_resume: Dict[str, Any], job_description: Optional[str]
     Future implementation will extract keywords, measure alignment, and
     generate actionable insights.
     """
+    resume_text = parsed_resume.get("text", "")
+    job_keywords = extract_keywords(job_description or "")[:12]
+    resume_keywords = set(extract_keywords(resume_text))
+    matched_keywords = [keyword for keyword in job_keywords if keyword in resume_keywords]
+    missing_keywords = [keyword for keyword in job_keywords if keyword not in resume_keywords]
+
     return {
-        "summary": "Resume analysis placeholder.",
-        "keywords": [],
-        "job_alignment": {"job_description_provided": bool(job_description)},
+        "summary": (
+            f"Resume currently matches {len(matched_keywords)} of {len(job_keywords)} "
+            "keywords extracted from the job description."
+            if job_keywords
+            else "Paste a job description to generate alignment insights."
+        ),
+        "keywords": {
+            "job": job_keywords,
+            "matched": matched_keywords,
+            "missing": missing_keywords,
+        },
+        "job_alignment": {
+            "job_description_provided": bool(job_description),
+            "matched_count": len(matched_keywords),
+            "missing_count": len(missing_keywords),
+        },
     }
 
 
@@ -48,7 +68,14 @@ def run_resume_pipeline(resume_path: str, job_description: Optional[str] = None)
     optimized_text = optimized.get("optimized_text", original_text)
 
     diff_text = generate_diff(original_text, optimized_text)
-    ats = calculate_ats_score(original_text, job_description or "")
+    current_ats = calculate_ats_score(original_text, job_description or "")
+    projected_ats = calculate_ats_score(optimized_text, job_description or "")
+    ats = {
+        **current_ats,
+        "projected_score": projected_ats.get("score", current_ats.get("score", 0)),
+        "projected_matched_keywords": projected_ats.get("matched_keywords", []),
+        "projected_missing_keywords": projected_ats.get("missing_keywords", []),
+    }
 
     logger.info(
         "Resume pipeline completed chars=%s matched_keywords=%s",
