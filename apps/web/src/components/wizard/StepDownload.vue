@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DiffLine, ImportedJob, PipelineResult } from '../../types/wizard'
+import type { DiffLine, ExperienceBulletComparison, ImportedJob, PipelineResult } from '../../types/wizard'
 
 const props = defineProps<{
   result: PipelineResult
@@ -10,6 +10,8 @@ const props = defineProps<{
   displayedAts: number
   readinessDelta: number
   importedJob: ImportedJob | null
+  preservedRoleCount: number
+  changedBulletComparisons: ExperienceBulletComparison[]
   previewPdfUrl: string
   previewPreparing: boolean
   previewFailed: boolean
@@ -56,16 +58,37 @@ const emit = defineEmits<{
     </div>
 
     <div class="action-row">
-      <button class="ghost" type="button" :disabled="previewPreparing || downloadingPdf" @click="emit('back')">Back</button>
-      <button class="ghost" type="button" :disabled="previewPreparing" @click="emit('regenerate')">
-        {{ previewPreparing ? 'Regenerating...' : 'Regenerate' }}
-      </button>
       <button class="secondary" type="button" :disabled="previewPreparing" @click="emit('preview')">
         {{ previewPreparing ? 'Preparing Preview...' : 'Preview' }}
       </button>
       <button class="primary" type="button" :disabled="downloadingPdf || previewPreparing" @click="emit('download')">
         {{ downloadingPdf ? 'Preparing PDF...' : 'Download PDF' }}
       </button>
+      <button class="ghost" type="button" :disabled="previewPreparing || downloadingPdf" @click="emit('regenerate')">
+        {{ previewPreparing ? 'Regenerating...' : 'Regenerate' }}
+      </button>
+      <button class="ghost" type="button" :disabled="previewPreparing || downloadingPdf" @click="emit('back')">Back</button>
+    </div>
+
+    <div class="trust-strip">
+      <article class="trust-card">
+        <strong>{{ preservedRoleCount }}</strong>
+        <span>roles preserved</span>
+      </article>
+      <article class="trust-card">
+        <strong>{{ changedBulletComparisons.length }}</strong>
+        <span>bullets improved</span>
+      </article>
+      <article class="trust-card">
+        <strong>ATS-safe</strong>
+        <span>structured PDF export</span>
+      </article>
+      <article class="trust-card">
+        <strong>
+          {{ previewPdfUrl ? 'Preview ready' : (previewPreparing ? 'Preparing' : (previewFailed ? 'Download only' : 'Ready to preview')) }}
+        </strong>
+        <span>{{ previewFailed ? 'download fallback available' : 'same output as final PDF' }}</span>
+      </article>
     </div>
 
     <article class="preview-card">
@@ -92,6 +115,33 @@ const emit = defineEmits<{
             : 'Click Preview to generate the PDF viewer.' }}
         </p>
       </div>
+    </article>
+
+    <article class="detail-card comparison-card">
+      <div class="card-head">
+        <h4>Changed bullets</h4>
+        <span>{{ changedBulletComparisons.length }}</span>
+      </div>
+      <div v-if="changedBulletComparisons.length" class="comparison-list">
+        <article
+          v-for="comparison in changedBulletComparisons"
+          :key="comparison.id"
+          class="comparison-item"
+        >
+          <p class="comparison-heading">{{ comparison.role_heading }}</p>
+          <div class="comparison-columns">
+            <div class="comparison-column">
+              <span>Original</span>
+              <p>{{ comparison.original }}</p>
+            </div>
+            <div class="comparison-column optimized-column">
+              <span>Optimized</span>
+              <p>{{ comparison.optimized }}</p>
+            </div>
+          </div>
+        </article>
+      </div>
+      <p v-else class="empty-copy">No bullet-level changes were detected for this run.</p>
     </article>
 
     <div class="detail-grid">
@@ -210,6 +260,33 @@ h3 {
   gap: 12px;
 }
 
+.trust-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trust-card {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.95), rgba(219, 234, 254, 0.55));
+  border: 1px solid rgba(20, 33, 61, 0.08);
+}
+
+.trust-card strong {
+  font-size: 1rem;
+  color: #14213d;
+}
+
+.trust-card span {
+  color: #5f6c80;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
 button {
   border: none;
   border-radius: 999px;
@@ -302,6 +379,62 @@ button:disabled {
   gap: 18px;
 }
 
+.comparison-card {
+  display: grid;
+  gap: 16px;
+}
+
+.comparison-list {
+  display: grid;
+  gap: 14px;
+}
+
+.comparison-item {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.comparison-heading {
+  margin: 0;
+  color: #14213d;
+  font-weight: 700;
+}
+
+.comparison-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.comparison-column {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(20, 33, 61, 0.05);
+}
+
+.comparison-column span {
+  color: #5f6c80;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.comparison-column p {
+  margin: 0;
+  color: #14213d;
+  line-height: 1.55;
+}
+
+.optimized-column {
+  background: rgba(220, 252, 231, 0.68);
+}
+
 .change-list {
   margin: 14px 0 0;
   padding-left: 18px;
@@ -348,6 +481,7 @@ button:disabled {
   }
 
   .metric-cluster,
+  .trust-strip,
   .detail-grid {
     grid-template-columns: 1fr;
     min-width: 0;
@@ -355,6 +489,10 @@ button:disabled {
 
   .preview-frame {
     height: 640px;
+  }
+
+  .comparison-columns {
+    grid-template-columns: 1fr;
   }
 }
 </style>

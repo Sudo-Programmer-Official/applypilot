@@ -11,10 +11,13 @@ import StepperWizard from './StepperWizard.vue'
 import type {
   ActionMode,
   DiffLine,
+  ExperienceBulletComparison,
   ImportedJob,
   ParsedResume,
   PipelineResult,
   ReadinessBreakdown,
+  ResumeDocument,
+  ResumeExperienceItem,
   WizardStep,
 } from '../../types/wizard'
 
@@ -158,6 +161,97 @@ const readinessBreakdownRows = computed(() => {
     value: breakdown[key] ?? 0,
   }))
 })
+const experienceEntryPairs = computed(() => matchExperienceEntries(
+  result.value?.parsed?.document,
+  result.value?.optimized?.document,
+))
+const preservedRoleCount = computed(() => experienceEntryPairs.value.filter((pair) => pair.original && pair.optimized).length)
+const changedBulletComparisons = computed<ExperienceBulletComparison[]>(() => {
+  const pairs: ExperienceBulletComparison[] = []
+
+  for (const [entryIndex, pair] of experienceEntryPairs.value.entries()) {
+    if (!pair.original || !pair.optimized) {
+      continue
+    }
+
+    const maxBulletCount = Math.max(pair.original.bullets.length, pair.optimized.bullets.length)
+    for (let bulletIndex = 0; bulletIndex < maxBulletCount; bulletIndex += 1) {
+      const original = normalizeComparisonText(pair.original.bullets[bulletIndex] ?? '')
+      const optimized = normalizeComparisonText(pair.optimized.bullets[bulletIndex] ?? '')
+
+      if (!original || !optimized || original === optimized) {
+        continue
+      }
+
+      pairs.push({
+        id: `${entryIndex}-${bulletIndex}`,
+        role_heading: formatExperienceHeading(pair.optimized),
+        original,
+        optimized,
+      })
+    }
+  }
+
+  return pairs.slice(0, 6)
+})
+
+function normalizeComparisonText(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function normalizeIdentity(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function formatExperienceHeading(entry: ResumeExperienceItem) {
+  const role = entry.role?.trim()
+  const company = entry.company?.trim()
+  if (role && company) {
+    return `${role} • ${company}`
+  }
+  return role || company || 'Experience update'
+}
+
+function matchExperienceEntries(parsed: ResumeDocument | undefined, optimized: ResumeDocument | undefined) {
+  const originalEntries = [...(parsed?.experience ?? [])]
+  const optimizedEntries = optimized?.experience ?? []
+  const usedOriginalIndexes = new Set<number>()
+
+  return optimizedEntries.map((optimizedEntry, optimizedIndex) => {
+    const normalizedRole = normalizeIdentity(optimizedEntry.role ?? '')
+    const normalizedCompany = normalizeIdentity(optimizedEntry.company ?? '')
+
+    const matchedIndex = originalEntries.findIndex((candidate, candidateIndex) => {
+      if (usedOriginalIndexes.has(candidateIndex)) {
+        return false
+      }
+
+      const candidateRole = normalizeIdentity(candidate.role ?? '')
+      const candidateCompany = normalizeIdentity(candidate.company ?? '')
+      if (candidateRole && candidateCompany && candidateRole === normalizedRole && candidateCompany === normalizedCompany) {
+        return true
+      }
+      return false
+    })
+
+    const fallbackIndex = matchedIndex >= 0
+      ? matchedIndex
+      : originalEntries.findIndex((_, candidateIndex) => (
+        !usedOriginalIndexes.has(candidateIndex) && candidateIndex === optimizedIndex
+      ))
+
+    const resolvedIndex = matchedIndex >= 0 ? matchedIndex : fallbackIndex
+    const original = resolvedIndex >= 0 ? originalEntries[resolvedIndex] : null
+    if (resolvedIndex >= 0) {
+      usedOriginalIndexes.add(resolvedIndex)
+    }
+
+    return {
+      original,
+      optimized: optimizedEntry,
+    }
+  })
+}
 
 function clearResultState() {
   result.value = null
@@ -612,6 +706,8 @@ onBeforeUnmount(() => {
         :displayed-ats="displayedAts"
         :readiness-delta="readinessDelta"
         :imported-job="importedJob"
+        :preserved-role-count="preservedRoleCount"
+        :changed-bullet-comparisons="changedBulletComparisons"
         :preview-pdf-url="previewPdfUrl"
         :preview-preparing="previewPreparing"
         :preview-failed="previewFailed"

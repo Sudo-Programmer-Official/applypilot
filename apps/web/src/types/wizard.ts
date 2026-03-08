@@ -69,6 +69,13 @@ export interface ResumeDocument {
   projects?: ResumeProjectItem[]
 }
 
+export interface ExperienceBulletComparison {
+  id: string
+  role_heading: string
+  original: string
+  optimized: string
+}
+
 export interface ResumeSectionSummary {
   name: string
   items: number
