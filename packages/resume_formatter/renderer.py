@@ -1,6 +1,8 @@
 """Render structured resumes into an ATS-safe PDF."""
 from __future__ import annotations
 
+import re
+import textwrap
 from ctypes.util import find_library
 from io import BytesIO
 from pathlib import Path
@@ -73,24 +75,15 @@ def _render_document(document: ResumeDocument, compact: bool = False) -> Tuple[b
 
 def _compact_document(document: ResumeDocument) -> ResumeDocument:
     compact = document.model_copy(deep=True)
-    compact.summary = _truncate(compact.summary, 180)
     compact.education = compact.education[:2]
-    compact.skills = {category: values[:6] for category, values in compact.skills.items()}
+    compact.skills = {category: values[:8] for category, values in compact.skills.items()}
     compact.experience = compact.experience[:4]
     for item in compact.experience:
-        item.bullets = item.bullets[:3]
+        item.bullets = item.bullets[:4]
     compact.projects = compact.projects[:2]
     for item in compact.projects:
-        item.details = _truncate(item.details, 120)
-        item.bullets = item.bullets[:1]
+        item.bullets = item.bullets[:2]
     return compact
-
-
-def _truncate(value: str, limit: int) -> str:
-    if len(value) <= limit:
-        return value
-    clipped = value[: limit - 1].rsplit(" ", 1)[0].rstrip(",;:-")
-    return f"{clipped}..."
 
 
 def _weasyprint_is_usable() -> bool:
@@ -111,7 +104,7 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
         from reportlab.lib.pagesizes import letter
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import inch
-        from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer, Table
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table
     except Exception as exc:
         raise RuntimeError("PDF export requires WeasyPrint or ReportLab to be installed.") from exc
 
@@ -126,6 +119,18 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
         leading=12 if compact else 13,
         spaceAfter=2,
         alignment=TA_LEFT,
+        splitLongWords=0,
+        embeddedHyphenation=0,
+        wordWrap="LTR",
+    )
+    bullet_style = ParagraphStyle(
+        "ResumeBullet",
+        parent=body_style,
+        leftIndent=16,
+        firstLineIndent=0,
+        bulletIndent=0,
+        spaceBefore=0,
+        spaceAfter=2,
     )
     name_style = ParagraphStyle(
         "ResumeName",
@@ -199,17 +204,17 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
                 right_text=entry.date,
                 bullets=entry.details,
                 body_style=body_style,
+                bullet_style=bullet_style,
                 table_cls=Table,
                 paragraph_cls=Paragraph,
-                list_cls=ListFlowable,
-                list_item_cls=ListItem,
                 spacer_cls=Spacer,
+                compact=compact,
             ))
 
     if document.skills:
         flow.append(Paragraph("Technical Skills", section_style))
         for category, values in document.skills.items():
-            skill_line = f"<b>{escape(category)}:</b> {escape(', '.join(values))}"
+            skill_line = _build_wrapped_skill_html(category, values, width=92 if compact else 102)
             flow.append(Paragraph(skill_line, body_style))
 
     if document.experience:
@@ -223,11 +228,11 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
                 right_text=entry.date,
                 bullets=entry.bullets,
                 body_style=body_style,
+                bullet_style=bullet_style,
                 table_cls=Table,
                 paragraph_cls=Paragraph,
-                list_cls=ListFlowable,
-                list_item_cls=ListItem,
                 spacer_cls=Spacer,
+                compact=compact,
             ))
 
     if document.projects:
@@ -241,11 +246,11 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
                 right_text="",
                 bullets=entry.bullets,
                 body_style=body_style,
+                bullet_style=bullet_style,
                 table_cls=Table,
                 paragraph_cls=Paragraph,
-                list_cls=ListFlowable,
-                list_item_cls=ListItem,
                 spacer_cls=Spacer,
+                compact=compact,
             ))
 
     doc.build(flow)
@@ -259,11 +264,11 @@ def _education_left(entry) -> str:
     return left_html
 
 
-def _build_entry_block(left_html, right_text, bullets, body_style, table_cls, paragraph_cls, list_cls, list_item_cls, spacer_cls):
+def _build_entry_block(left_html, right_text, bullets, body_style, bullet_style, table_cls, paragraph_cls, spacer_cls, compact=False):
     block = []
     row = table_cls(
         [[paragraph_cls(left_html, body_style), paragraph_cls(escape(right_text), body_style)]],
-        colWidths=[390, 120],
+        colWidths=[402 if compact else 394, 108 if compact else 116],
         hAlign="LEFT",
     )
     row.setStyle(
@@ -279,11 +284,36 @@ def _build_entry_block(left_html, right_text, bullets, body_style, table_cls, pa
     block.append(row)
 
     if bullets:
-        bullet_items = [
-            list_item_cls(paragraph_cls(escape(bullet), body_style), leftIndent=10)
-            for bullet in bullets
-        ]
-        block.append(list_cls(bullet_items, bulletType="bullet", start="bulletchar", leftIndent=12))
+        for bullet in bullets:
+            block.append(_build_bullet_paragraph(bullet, bullet_style, paragraph_cls, width=90 if compact else 98))
 
     block.append(spacer_cls(1, 4))
     return block
+
+
+def _build_bullet_paragraph(text: str, bullet_style, paragraph_cls, width: int):
+    wrapped_lines = _wrap_resume_text(text, width)
+    html = "<br/>".join(escape(line) for line in wrapped_lines)
+    return paragraph_cls(html, bullet_style, bulletText="•")
+
+
+def _build_wrapped_skill_html(category: str, values: list[str], width: int) -> str:
+    prefix_width = max(width - len(category) - 2, 36)
+    wrapped_values = _wrap_resume_text(", ".join(values), prefix_width)
+    if not wrapped_values:
+        return f"<b>{escape(category)}:</b>"
+    first_line = f"<b>{escape(category)}:</b> {escape(wrapped_values[0])}"
+    continuation = "".join(f"<br/>{escape(line)}" for line in wrapped_values[1:])
+    return f"{first_line}{continuation}"
+
+
+def _wrap_resume_text(text: str, width: int) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return [""]
+    return textwrap.wrap(
+        cleaned,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [cleaned]

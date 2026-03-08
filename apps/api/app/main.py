@@ -28,6 +28,7 @@ from packages.postgres_store import (
 from packages.resume_formatter.builder import build_resume_document
 from packages.resume_formatter.renderer import render_resume_pdf
 from packages.resume_parser import PARSER_VERSION, parse_resume
+from packages.shared_types.resume_document import ResumeDocument
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level, logging.INFO),
@@ -248,10 +249,17 @@ async def apply_resume_suggestions(file: UploadFile = File(...), suggestions: st
 @app.post("/resume/download")
 async def download_resume_pdf(payload: ResumeDownloadRequest):
     resume_text = payload.resume_text.strip()
-    if not resume_text:
+    if not resume_text and not payload.document:
         raise HTTPException(status_code=400, detail="Resume text is required for PDF export.")
 
-    document = build_resume_document(resume_text, role_label=payload.role_label)
+    try:
+        if payload.document:
+            document = ResumeDocument.model_validate(payload.document)
+        else:
+            document = build_resume_document(resume_text, role_label=payload.role_label)
+    except Exception as exc:
+        logger.warning("Resume export payload could not be normalized: %s", exc)
+        raise HTTPException(status_code=400, detail="Resume document payload is invalid.") from exc
 
     try:
         pdf_bytes, rendered_document, render_meta = render_resume_pdf(document)

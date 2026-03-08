@@ -57,13 +57,16 @@ h2 {
 
 .entry-head {
   align-items: baseline;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .entry-title {
   font-size: 11.8px;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .entry-date {
@@ -75,6 +78,9 @@ h2 {
 
 .skill-line {
   margin: 2px 0;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 ul {
@@ -84,4 +90,7 @@ ul {
 
 li {
   margin-bottom: 3px;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }

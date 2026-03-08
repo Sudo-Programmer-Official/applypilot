@@ -74,6 +74,44 @@ class ResumeBuilderTests(unittest.TestCase):
         self.assertEqual(document.experience[0].role, "Software Engineer")
         self.assertGreaterEqual(len(document.projects), 2)
 
+    def test_preserves_full_bullets_without_ellipsis(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Backend Engineer",
+                "abhishek@example.com",
+                "Experience",
+                "Software Engineer - Example Labs Jan 2022 - Present",
+                "- Architected high-scale distributed backend services using AWS Lambda and RDS to process 11M+ records across 30-40 concurrent workers with fault-tolerant orchestration and measurable impact.",
+                "- Designed checkpoint-based execution control and indexed resume mechanisms enabling resilient high-availability execution under heavy parallel workloads using Machine Learning and observability systems.",
+            ]
+        )
+
+        document = build_resume_document(resume_text)
+
+        self.assertEqual(len(document.experience[0].bullets), 2)
+        self.assertNotIn("...", document.experience[0].bullets[0])
+        self.assertIn("30-40 concurrent workers", document.experience[0].bullets[0])
+        self.assertIn("Machine Learning", document.experience[0].bullets[1])
+
+    def test_merges_wrapped_skill_lines_into_same_category(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Technical Skills",
+                "Backend & Distributed Systems: Microservices Architecture, REST APIs, Fault Tolerance, Horizontal Scaling, Concur-",
+                "rency, Parallel Processing, CI/CD, Moni-",
+                "toring",
+            ]
+        )
+
+        document = build_resume_document(resume_text)
+        values = document.skills["Backend & Distributed Systems"]
+
+        self.assertIn("Concurrency", values)
+        self.assertIn("Monitoring", values)
+        self.assertNotIn("Core Skills", document.skills)
+
 
 class ResumeParserTests(unittest.TestCase):
     def test_parse_docx_fixture_preserves_structure(self) -> None:

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class ResumeDownloadRequest(BaseModel):
     resume_text: str
+    document: dict | None = None
     file_name: str | None = None
     role_label: str | None = None
     use_optimized: bool = True

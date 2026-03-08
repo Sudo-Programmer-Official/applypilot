@@ -115,7 +115,7 @@ h2 {
 
 .stepper-list {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
   margin-top: 18px;
 }
@@ -123,8 +123,9 @@ h2 {
 .step-pill {
   display: flex;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
   width: 100%;
+  min-width: 0;
   padding: 12px;
   border: 1px solid rgba(20, 33, 61, 0.12);
   border-radius: 18px;
@@ -171,22 +172,21 @@ h2 {
 
 .step-copy {
   display: grid;
+  min-width: 0;
 }
 
 .step-copy strong {
   font-size: 0.94rem;
+  overflow-wrap: anywhere;
 }
 
 .step-copy small {
   color: #5f6c80;
   font-size: 0.72rem;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 980px) {
-  .stepper-list {
-    grid-template-columns: 1fr;
-  }
-
   .stepper-shell {
     position: static;
   }

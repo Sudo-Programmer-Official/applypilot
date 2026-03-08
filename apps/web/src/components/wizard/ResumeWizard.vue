@@ -417,8 +417,13 @@ async function downloadResume() {
 
   downloadingPdf.value = true
   try {
+    const documentPayload = !isEditingResume.value
+      ? (fixApplied.value ? result.value?.optimized?.document : result.value?.parsed?.document)
+      : undefined
+
     const response = await axios.post(`${apiBase}/resume/download`, {
       resume_text: text,
+      document: documentPayload,
       file_name: result.value?.parsed?.file_name,
       role_label: roleLabel.value,
       use_optimized: fixApplied.value,

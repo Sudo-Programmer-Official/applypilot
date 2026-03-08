@@ -102,7 +102,7 @@ def build_resume_document(
         name=name,
         title=title,
         contact_items=contact_items,
-        summary=_truncate_text(" ".join(summary_lines).strip(), 260),
+        summary=_clean_text(" ".join(summary_lines).strip()),
         education=_parse_education(sections.get("education", [])),
         skills=_parse_skills(sections.get("skills", [])),
         experience=_parse_experience(sections.get("experience", [])),
@@ -269,7 +269,7 @@ def _parse_education(lines: List[str]) -> List[ResumeEducationItem]:
     for line in lines:
         bullet = _strip_bullet(line)
         if bullet and current:
-            current.details.append(_truncate_text(bullet, 140))
+            current.details.append(_clean_text(bullet))
             continue
 
         main, date = _split_trailing_date(line)
@@ -286,21 +286,23 @@ def _parse_education(lines: List[str]) -> List[ResumeEducationItem]:
 
 def _parse_skills(lines: List[str]) -> Dict[str, List[str]]:
     categories: Dict[str, List[str]] = {}
+    current_category = "Core Skills"
     for line in lines:
         cleaned = _strip_bullet(line) or line
         if ":" in cleaned:
             category, values = cleaned.split(":", 1)
             category_name = category.strip() or "Core Skills"
             skill_values = _split_skill_values(values)
+            current_category = category_name
         else:
-            category_name = "Core Skills"
+            category_name = current_category
             skill_values = _split_skill_values(cleaned)
 
         if not skill_values:
             continue
 
         categories.setdefault(category_name, [])
-        categories[category_name].extend(skill_values)
+        _merge_skill_fragments(categories[category_name], skill_values)
         categories[category_name] = _dedupe(categories[category_name])[:10]
 
     return categories
@@ -309,6 +311,38 @@ def _parse_skills(lines: List[str]) -> Dict[str, List[str]]:
 def _split_skill_values(values: str) -> List[str]:
     items = [item.strip(" -") for item in re.split(r",|;|\u2022", values) if item.strip(" -")]
     return [item for item in items if item]
+
+
+def _merge_skill_fragments(existing: List[str], incoming: List[str]) -> None:
+    if not incoming:
+        return
+
+    if existing:
+        previous = existing[-1]
+        first = incoming[0]
+        if _should_join_skill_fragments(previous, first):
+            existing[-1] = _clean_text(f"{previous.rstrip('-')}{first}")
+            incoming = incoming[1:]
+
+    existing.extend(_clean_text(item) for item in incoming)
+
+
+def _should_join_skill_fragments(previous: str, current: str) -> bool:
+    prev = previous.strip()
+    curr = current.strip()
+    if not prev or not curr:
+        return False
+    if prev.endswith("-"):
+        return True
+    if " " in prev or " " in curr:
+        return False
+    if not curr[:1].islower():
+        return False
+    if not prev.replace("/", "").replace("+", "").isalpha():
+        return False
+    if not curr.replace("/", "").replace("+", "").isalpha():
+        return False
+    return len(prev) <= 10 and len(curr) <= 10
 
 
 def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
@@ -321,8 +355,8 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
             if current is None:
                 current = ResumeExperienceItem(role="Experience", company="", date="", start_date="", end_date="", bullets=[])
                 entries.append(current)
-            current.bullets.append(_truncate_text(bullet, 140))
-            current.bullets = current.bullets[:5]
+            current.bullets.append(_clean_text(bullet))
+            current.bullets = current.bullets[:4]
             continue
 
         if current and current.bullets:
@@ -353,14 +387,14 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
             continue
 
         if current is None:
-            current = ResumeExperienceItem(role=line, company="", date="", start_date="", end_date="", bullets=[])
+            current = ResumeExperienceItem(role=_clean_text(line), company="", date="", start_date="", end_date="", bullets=[])
             entries.append(current)
             continue
 
         if current.company:
-            current.company = _truncate_text(f"{current.company} {line}".strip(), 80)
+            current.company = _clean_text(f"{current.company} {line}".strip())
         else:
-            current.company = _truncate_text(line, 80)
+            current.company = _clean_text(line)
 
     return [entry for entry in entries if entry.role or entry.company or entry.bullets]
 
@@ -375,7 +409,7 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
             if current is None:
                 current = ResumeProjectItem(name="Project", details="", bullets=[])
                 entries.append(current)
-            current.bullets.append(_truncate_text(bullet, 140))
+            current.bullets.append(_clean_text(bullet))
             current.bullets = current.bullets[:3]
             continue
 
@@ -383,13 +417,13 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
             name, details = _split_once(line, ":")
             current = ResumeProjectItem(
                 name=name or "Project",
-                details=_truncate_text(details, 180),
+                details=_clean_text(details),
                 bullets=[],
             )
             entries.append(current)
             continue
 
-        current = ResumeProjectItem(name=line, details="", bullets=[])
+        current = ResumeProjectItem(name=_clean_text(line), details="", bullets=[])
         entries.append(current)
 
     return entries[:3]
@@ -403,14 +437,14 @@ def _parse_role_company_date(line: str) -> Tuple[str, str, str, str, str]:
     if len(parts) >= 2:
         role, company = _classify_role_company(parts)
         return (
-            _truncate_text(role, 70),
-            _truncate_text(company, 70),
+            _clean_text(role),
+            _clean_text(company),
             date,
             start_date,
             end_date,
         )
 
-    return _truncate_text(main.strip(), 90), "", date, start_date, end_date
+    return _clean_text(main.strip()), "", date, start_date, end_date
 
 
 def _split_trailing_date(line: str) -> Tuple[str, str]:
@@ -493,12 +527,8 @@ def _strip_bullet(line: str) -> str:
     return ""
 
 
-def _truncate_text(value: str, max_length: int) -> str:
-    cleaned = re.sub(r"\s+", " ", value).strip()
-    if len(cleaned) <= max_length:
-        return cleaned
-    truncated = cleaned[: max_length - 1].rsplit(" ", 1)[0].rstrip(",;:-")
-    return f"{truncated}..."
+def _clean_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def _dedupe(items: Iterable[str]) -> List[str]:

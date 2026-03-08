@@ -94,6 +94,7 @@ export interface PipelineResult {
   analysis: AnalysisResult
   optimized: {
     text?: string
+    document?: ResumeDocument
     metadata?: { suggestions?: string[]; highlighted_keywords?: string[] }
   }
   diff: { unified?: string }
