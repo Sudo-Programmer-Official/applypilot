@@ -1,46 +1,30 @@
-"""Keyword extraction utilities for job descriptions and resumes."""
+"""Backward-compatible wrapper around the job intelligence extractor."""
 from __future__ import annotations
 
-import re
-from typing import List, Set
+from typing import Iterable, List, Dict, Any
 
-# Minimal stopword list to reduce noise; keep small to avoid heavy deps.
-_STOPWORDS: Set[str] = {
-    "the",
-    "and",
-    "for",
-    "with",
-    "that",
-    "this",
-    "from",
-    "your",
-    "you",
-    "are",
-    "our",
-    "will",
-    "have",
-    "has",
-    "on",
-    "in",
-    "of",
-    "to",
-    "a",
-    "an",
-}
+from packages.job_intelligence.extractor import (
+    analyze_job_description,
+    extract_resume_skills,
+    get_role_template_skills,
+    keyword_names,
+)
 
 
 def extract_keywords(text: str, min_length: int = 3) -> List[str]:
-    """Extract de-duplicated keywords from text using simple heuristics."""
-    if not text:
-        return []
+    del min_length
+    return keyword_names(analyze_job_description(text).get("skills", []))
 
-    tokens = re.findall(r"[A-Za-z0-9+#\.\-]{2,}", text.lower())
-    keywords: Set[str] = set()
-    for tok in tokens:
-        if len(tok) < min_length:
-            continue
-        if tok in _STOPWORDS:
-            continue
-        keywords.add(tok)
 
-    return sorted(keywords)
+def keyword_names_from_items(items: Iterable[Dict[str, Any]]) -> List[str]:
+    return keyword_names(items)
+
+
+__all__ = [
+    "analyze_job_description",
+    "extract_keywords",
+    "extract_resume_skills",
+    "get_role_template_skills",
+    "keyword_names",
+    "keyword_names_from_items",
+]

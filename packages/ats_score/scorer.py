@@ -1,33 +1,34 @@
 """ATS scoring module based on keyword coverage heuristics."""
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
-from packages.keyword_engine.extractor import extract_keywords
+from packages.job_intelligence.extractor import analyze_job_description, extract_resume_skills, keyword_names
 
 
 def calculate_ats_score(resume_text: str, job_description: str) -> Dict[str, object]:
-    """Compute a simple ATS score using keyword overlap."""
-    jd_keywords: List[str] = extract_keywords(job_description or "")
-    if not jd_keywords:
+    """Compute ATS score using high-signal ranked role skills."""
+    job_intelligence = analyze_job_description(job_description or "")
+    job_skills = job_intelligence.get("skills", [])
+    if not job_skills:
         return {
             "score": 0,
             "matched_keywords": [],
             "missing_keywords": [],
-            "notes": ["No job description provided; ATS score unavailable."],
+            "notes": ["No high-signal skills were extracted from the job description."],
         }
 
-    resume_tokens = set(extract_keywords(resume_text or ""))
-
-    matched = sorted([kw for kw in jd_keywords if kw in resume_tokens])
-    missing = sorted([kw for kw in jd_keywords if kw not in resume_tokens])
-
-    total = len(jd_keywords)
-    score = int(round((len(matched) / total) * 100)) if total else 0
+    resume_tokens = set(keyword_names(extract_resume_skills(resume_text or "")))
+    total_weight = sum(skill["score"] for skill in job_skills)
+    matched_skills: List[Dict[str, Any]] = [skill for skill in job_skills if skill["name"] in resume_tokens]
+    missing_skills: List[Dict[str, Any]] = [skill for skill in job_skills if skill["name"] not in resume_tokens]
+    matched_weight = sum(skill["score"] for skill in matched_skills)
+    score = int(round((matched_weight / total_weight) * 100)) if total_weight else 0
+    role_label = job_intelligence.get("role_type", {}).get("label", "Software Engineer")
 
     return {
         "score": score,
-        "matched_keywords": matched,  # type: List[str]
-        "missing_keywords": missing,  # type: List[str]
-        "notes": ["Keyword coverage heuristic; refine with weighting later."],
+        "matched_keywords": keyword_names(matched_skills),
+        "missing_keywords": keyword_names(missing_skills),
+        "notes": [f"Scored against the top {len(job_skills)} skills for a {role_label} role."],
     }

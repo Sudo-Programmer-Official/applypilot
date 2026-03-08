@@ -10,3 +10,4 @@ class PipelineResult(BaseModel):
     optimized: Dict[str, Any]
     diff: Dict[str, Any]
     ats_score: Dict[str, Any]
+    application_readiness: Dict[str, Any]

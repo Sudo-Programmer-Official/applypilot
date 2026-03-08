@@ -8,10 +8,11 @@ phases.
 import logging
 from typing import Any, Dict, Optional
 
-from packages.ats_score.scorer import calculate_ats_score
 from packages.ai_engine.optimizer import optimize_resume
+from packages.ats_score.scorer import calculate_ats_score
 from packages.diff_engine.diff_engine import generate_diff
-from packages.keyword_engine.extractor import extract_keywords
+from packages.job_intelligence.extractor import analyze_job_description, extract_resume_skills, keyword_names
+from packages.readiness_score.scorer import calculate_application_readiness
 from packages.resume_parser.parser import parse_resume
 from packages.shared_types.pipeline_result import PipelineResult
 
@@ -26,27 +27,43 @@ def analyze_resume(parsed_resume: Dict[str, Any], job_description: Optional[str]
     generate actionable insights.
     """
     resume_text = parsed_resume.get("text", "")
-    job_keywords = extract_keywords(job_description or "")[:12]
-    resume_keywords = set(extract_keywords(resume_text))
-    matched_keywords = [keyword for keyword in job_keywords if keyword in resume_keywords]
-    missing_keywords = [keyword for keyword in job_keywords if keyword not in resume_keywords]
+    job_intelligence = analyze_job_description(job_description or "")
+    job_skills = job_intelligence.get("skills", [])
+    role_type = job_intelligence.get("role_type", {"id": "general_software", "label": "Software Engineer"})
+    resume_skill_names = set(keyword_names(extract_resume_skills(resume_text)))
+
+    matched_skills = [skill for skill in job_skills if skill["name"] in resume_skill_names]
+    missing_skills = [skill for skill in job_skills if skill["name"] not in resume_skill_names]
+    suggested_changes = [
+        f"Add {skill['name']} in {', '.join(skill['suggested_sections'][:2])}."
+        for skill in missing_skills[:3]
+    ]
+    if resume_text and not any(char.isdigit() for char in resume_text):
+        suggested_changes.append("Quantify impact in your recent experience bullets.")
+    if role_type["label"]:
+        suggested_changes.append(f"Align the summary with {role_type['label']} language from the job description.")
 
     return {
         "summary": (
-            f"Resume currently matches {len(matched_keywords)} of {len(job_keywords)} "
-            "keywords extracted from the job description."
-            if job_keywords
+            f"Detected {role_type['label']} role. Resume matches {len(matched_skills)} of "
+            f"{len(job_skills)} high-signal skills."
+            if job_skills
             else "Paste a job description to generate alignment insights."
         ),
+        "role_type": role_type,
+        "top_skills": job_skills,
+        "matched_skills": matched_skills,
+        "missing_skills": missing_skills,
+        "suggested_changes": suggested_changes,
         "keywords": {
-            "job": job_keywords,
-            "matched": matched_keywords,
-            "missing": missing_keywords,
+            "job": keyword_names(job_skills),
+            "matched": keyword_names(matched_skills),
+            "missing": keyword_names(missing_skills),
         },
         "job_alignment": {
             "job_description_provided": bool(job_description),
-            "matched_count": len(matched_keywords),
-            "missing_count": len(missing_keywords),
+            "matched_count": len(matched_skills),
+            "missing_count": len(missing_skills),
         },
     }
 
@@ -76,6 +93,14 @@ def run_resume_pipeline(resume_path: str, job_description: Optional[str] = None)
         "projected_matched_keywords": projected_ats.get("matched_keywords", []),
         "projected_missing_keywords": projected_ats.get("missing_keywords", []),
     }
+    current_readiness = calculate_application_readiness(original_text, job_description or "")
+    projected_readiness = calculate_application_readiness(optimized_text, job_description or "")
+    readiness = {
+        **current_readiness,
+        "projected_score": projected_readiness.get("score", current_readiness.get("score", 0)),
+        "projected_breakdown": projected_readiness.get("breakdown", {}),
+        "projected_top_issues": projected_readiness.get("top_issues", []),
+    }
 
     logger.info(
         "Resume pipeline completed chars=%s matched_keywords=%s",
@@ -92,4 +117,5 @@ def run_resume_pipeline(resume_path: str, job_description: Optional[str] = None)
         },
         diff={"unified": diff_text},
         ats_score=ats,
+        application_readiness=readiness,
     )

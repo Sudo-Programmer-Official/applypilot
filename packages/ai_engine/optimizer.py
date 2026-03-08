@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from packages.keyword_engine.extractor import extract_keywords
+from packages.job_intelligence.extractor import analyze_job_description, extract_resume_skills, keyword_names
 
 
 def _is_section_heading(line: str) -> bool:
@@ -11,6 +11,21 @@ def _is_section_heading(line: str) -> bool:
     if not normalized:
         return False
     return normalized.isupper() or normalized.endswith(":")
+
+
+def _should_preserve_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return True
+    if "@" in stripped or "http" in stripped.lower():
+        return True
+    if "|" in stripped or "\\" in stripped:
+        return True
+    if sum(char.isdigit() for char in stripped) >= 5:
+        return True
+    if len(stripped.split()) <= 2 and stripped == stripped.title():
+        return True
+    return False
 
 
 def _inject_keyword(line: str, keyword: str) -> str:
@@ -47,8 +62,8 @@ def optimize_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
 
     This is intentionally heuristic and does not claim model-driven accuracy.
     """
-    job_keywords = extract_keywords(job_description or "")[:10]
-    resume_keywords = set(extract_keywords(resume_text or ""))
+    job_keywords = keyword_names(analyze_job_description(job_description or "", limit=10).get("skills", []))
+    resume_keywords = set(keyword_names(extract_resume_skills(resume_text or "")))
     missing_keywords = [keyword for keyword in job_keywords if keyword not in resume_keywords][:5]
 
     base_text = resume_text.strip()
@@ -87,7 +102,7 @@ def optimize_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
         if not stripped:
             optimized_lines.append("")
             continue
-        if _is_section_heading(stripped):
+        if _is_section_heading(stripped) or _should_preserve_line(stripped):
             optimized_lines.append(stripped)
             continue
 
