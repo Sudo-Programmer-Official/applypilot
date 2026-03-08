@@ -18,6 +18,7 @@ import type {
   ReadinessBreakdown,
   ResumeDocument,
   ResumeExperienceItem,
+  SkillInsight,
   WizardStep,
 } from '../../types/wizard'
 
@@ -99,16 +100,44 @@ const loadingStages = computed(() => (activeAction.value === 'suggestions' ? sug
 const currentLoadingStage = computed(() => loadingStages.value[loadingStageIndex.value] ?? loadingStages.value[0] ?? '')
 const analysisMode = computed(() => result.value?.analysis?.mode ?? mode.value)
 const isSuggestionMode = computed(() => analysisMode.value === 'suggestions')
-const roleLabel = computed(() => result.value?.analysis?.role_type?.label ?? parsedResume.value?.document?.title ?? 'Software Engineer')
-const topSkills = computed(() => result.value?.analysis?.top_skills ?? [])
+const importedTopSkills = computed<SkillInsight[]>(() => (
+  importedJob.value?.skills?.map((skillName) => ({
+    name: skillName,
+    category: 'imported',
+    count: 1,
+    score: 1,
+    reason: 'Imported from the job posting.',
+    suggested_sections: [],
+  })) ?? []
+))
+const roleLabel = computed(() => {
+  const detectedRole = result.value?.analysis?.role_type?.label?.trim()
+  if (detectedRole && detectedRole.toLowerCase() !== 'software engineer') {
+    return detectedRole
+  }
+  if (importedJob.value?.title?.trim()) {
+    return importedJob.value.title.trim()
+  }
+  return parsedResume.value?.document?.title ?? detectedRole ?? 'Software Engineer'
+})
+const topSkills = computed(() => {
+  const analyzedSkills = result.value?.analysis?.top_skills ?? []
+  return analyzedSkills.length ? analyzedSkills : importedTopSkills.value
+})
 const missingSkills = computed(() => result.value?.analysis?.missing_skills ?? [])
 const appliedChanges = computed(() => result.value?.analysis?.applied_changes ?? result.value?.analysis?.suggested_changes ?? [])
 const unresolvedSuggestions = computed(() => result.value?.analysis?.unresolved_suggestions ?? [])
 const currentReadiness = computed(() => result.value?.application_readiness?.score ?? 0)
-const projectedReadiness = computed(() => result.value?.application_readiness?.projected_score ?? currentReadiness.value)
+const projectedReadiness = computed(() => Math.max(
+  result.value?.application_readiness?.projected_score ?? currentReadiness.value,
+  currentReadiness.value,
+))
 const displayedReadiness = computed(() => (fixApplied.value ? projectedReadiness.value : currentReadiness.value))
 const currentAts = computed(() => result.value?.ats_score?.score ?? 0)
-const projectedAts = computed(() => result.value?.ats_score?.projected_score ?? currentAts.value)
+const projectedAts = computed(() => Math.max(
+  result.value?.ats_score?.projected_score ?? currentAts.value,
+  currentAts.value,
+))
 const displayedAts = computed(() => (fixApplied.value ? projectedAts.value : currentAts.value))
 const readinessDelta = computed(() => Math.max(projectedReadiness.value - currentReadiness.value, 0))
 const canAdvanceFromJobStep = computed(() => (
@@ -144,6 +173,13 @@ const diffLines = computed<DiffLine[]>(() => {
 const displayedTopIssues = computed(() => {
   if (isSuggestionMode.value) {
     return appliedChanges.value.length ? appliedChanges.value : unresolvedSuggestions.value
+  }
+  if (!topSkills.value.length && importedJob.value) {
+    return [
+      "Imported posting needs richer JD text for deeper skill extraction.",
+      "Paste the responsibilities or requirements section if you want stronger tailoring.",
+      "You can still export the cleaned resume draft from the current pipeline.",
+    ]
   }
   if (fixApplied.value) {
     return result.value?.application_readiness?.projected_top_issues ?? []
@@ -726,20 +762,26 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
   gap: 24px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .wizard-sidebar {
   display: grid;
   align-content: start;
   gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .sidebar-card {
-  padding: 22px;
+  padding: 28px;
   border: 1px solid rgba(20, 33, 61, 0.12);
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 18px 42px rgba(20, 33, 61, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
 .sidebar-kicker {
@@ -788,6 +830,9 @@ onBeforeUnmount(() => {
 
 .wizard-main {
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .error-card {
@@ -806,6 +851,15 @@ onBeforeUnmount(() => {
 @media (max-width: 1100px) {
   .wizard-layout {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .wizard-sidebar,
+  .wizard-main {
+    overflow: visible;
+    padding-right: 0;
   }
 }
 </style>

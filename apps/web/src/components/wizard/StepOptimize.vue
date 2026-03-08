@@ -43,6 +43,28 @@ const modeCopy = computed(() => {
     action: 'Generate Optimized Resume',
   }
 })
+
+const readinessDisplay = computed(() => (
+  props.projectedReadiness > props.currentReadiness
+    ? `${props.currentReadiness} → ${props.projectedReadiness}`
+    : `${props.currentReadiness}`
+))
+
+const atsDisplay = computed(() => (
+  props.projectedAts > props.currentAts
+    ? `${props.currentAts} → ${props.projectedAts}`
+    : `${props.currentAts}`
+))
+
+const topSkillsEmptyCopy = computed(() => {
+  if (props.mode === 'suggestions') {
+    return 'Suggestions mode does not require job-specific skill extraction.'
+  }
+  if (props.importedJob) {
+    return 'Paste the requirements section if you want stronger skill extraction from this posting.'
+  }
+  return 'Add a richer job description to extract high-signal role skills.'
+})
 </script>
 
 <template>
@@ -96,13 +118,14 @@ const modeCopy = computed(() => {
           <p v-if="importedJob && mode === 'analyze'">
             {{ importedJob.company }}{{ importedJob.title ? ` • ${importedJob.title}` : '' }}
           </p>
+          <p v-else-if="result.analysis.summary">{{ result.analysis.summary }}</p>
           <p v-else>Structured optimization is ready for review before export.</p>
         </article>
 
         <article class="summary-card">
-          <p class="eyebrow">Readiness</p>
-          <h4>{{ currentReadiness }} → {{ projectedReadiness }}</h4>
-          <p>ATS compatibility: {{ currentAts }} → {{ projectedAts }}</p>
+          <p class="eyebrow">Match score</p>
+          <h4>{{ readinessDisplay }}</h4>
+          <p>ATS compatibility: {{ atsDisplay }}</p>
         </article>
       </div>
 
@@ -112,9 +135,10 @@ const modeCopy = computed(() => {
             <h4>Top skills</h4>
             <span>{{ topSkills.length }}</span>
           </div>
-          <div class="tag-list">
+          <div v-if="topSkills.length" class="tag-list">
             <span v-for="skill in topSkills.slice(0, 8)" :key="skill.name" class="tag">{{ skill.name }}</span>
           </div>
+          <p v-else class="empty-copy">{{ topSkillsEmptyCopy }}</p>
         </article>
 
         <article class="analysis-card">

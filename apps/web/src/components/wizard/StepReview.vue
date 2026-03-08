@@ -30,60 +30,64 @@ const contactLine = computed(() => (document.value.contact_items ?? []).join(' â
       </div>
     </div>
 
-    <div class="overview-grid">
-      <article class="overview-card hero-card">
-        <p class="eyebrow">Candidate profile</p>
-        <h4>{{ document.name || 'Candidate' }}</h4>
-        <p class="headline">{{ document.title || 'Role title not detected yet' }}</p>
-        <p v-if="contactLine" class="meta-line">{{ contactLine }}</p>
-        <p class="summary-copy">{{ document.summary || 'No summary block was detected in the uploaded resume.' }}</p>
-      </article>
+    <div class="review-grid">
+      <div class="review-primary">
+        <article class="overview-card hero-card profile-card">
+          <p class="eyebrow">Candidate profile</p>
+          <h4>{{ document.name || 'Candidate' }}</h4>
+          <p class="headline">{{ document.title || 'Role title not detected yet' }}</p>
+          <p v-if="contactLine" class="meta-line">{{ contactLine }}</p>
+          <p class="summary-copy">{{ document.summary || 'No summary block was detected in the uploaded resume.' }}</p>
+        </article>
 
-      <article class="overview-card sections-card">
-        <p class="eyebrow">Section coverage</p>
-        <div class="section-grid">
-          <div v-for="section in parsed.sections || []" :key="section.name" class="section-chip">
-            <strong>{{ section.items }}</strong>
-            <span>{{ section.name }}</span>
+        <article class="detail-card experience-card">
+          <div class="detail-head">
+            <h4>Experience</h4>
+            <span>{{ experienceItems.length }}</span>
           </div>
-        </div>
-      </article>
-    </div>
-
-    <div class="detail-grid">
-      <article class="detail-card">
-        <div class="detail-head">
-          <h4>Detected skills</h4>
-          <span>{{ skillEntries.length }}</span>
-        </div>
-        <div v-if="skillEntries.length" class="skill-groups">
-          <div v-for="[category, values] in skillEntries" :key="category" class="skill-group">
-            <strong>{{ category }}</strong>
-            <p>{{ values.join(', ') }}</p>
-          </div>
-        </div>
-        <p v-else class="empty-copy">No structured skill groups detected. You can still continue to job tailoring.</p>
-      </article>
-
-      <article class="detail-card">
-        <div class="detail-head">
-          <h4>Detected experience</h4>
-          <span>{{ experienceItems.length }}</span>
-        </div>
-        <div v-if="experienceItems.length" class="timeline">
-          <div v-for="item in experienceItems" :key="`${item.company}-${item.role}-${item.date}`" class="timeline-item">
-            <div class="timeline-top">
-              <strong>{{ item.role || item.company }}</strong>
-              <span>{{ item.date }}</span>
+          <div v-if="experienceItems.length" class="timeline-scroller">
+            <div class="timeline">
+              <div v-for="item in experienceItems" :key="`${item.company}-${item.role}-${item.date}`" class="timeline-item">
+                <div class="timeline-top">
+                  <strong>{{ item.role || item.company }}</strong>
+                  <span>{{ item.date }}</span>
+                </div>
+                <p>{{ item.company }}</p>
+                <ul v-if="item.bullets?.length">
+                  <li v-for="bullet in item.bullets.slice(0, 3)" :key="bullet">{{ bullet }}</li>
+                </ul>
+              </div>
             </div>
-            <p>{{ item.company }}</p>
-            <ul v-if="item.bullets?.length">
-              <li v-for="bullet in item.bullets.slice(0, 2)" :key="bullet">{{ bullet }}</li>
-            </ul>
           </div>
-        </div>
-        <p v-else class="empty-copy">Experience entries were not clearly classified. Re-upload if the file is malformed.</p>
-      </article>
+          <p v-else class="empty-copy">Experience entries were not clearly classified. Re-upload if the file is malformed.</p>
+        </article>
+      </div>
+
+      <aside class="review-sidebar">
+        <article class="overview-card sections-card">
+          <p class="eyebrow">Section coverage</p>
+          <div class="section-grid">
+            <div v-for="section in parsed.sections || []" :key="section.name" class="section-chip">
+              <strong>{{ section.items }}</strong>
+              <span>{{ section.name }}</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <div class="detail-head">
+            <h4>Detected skills</h4>
+            <span>{{ skillEntries.length }}</span>
+          </div>
+          <div v-if="skillEntries.length" class="skill-groups">
+            <div v-for="[category, values] in skillEntries" :key="category" class="skill-group">
+              <strong>{{ category }}</strong>
+              <p>{{ values.join(', ') }}</p>
+            </div>
+          </div>
+          <p v-else class="empty-copy">No structured skill groups detected. You can still continue to job tailoring.</p>
+        </article>
+      </aside>
     </div>
 
     <div class="step-actions">
@@ -96,12 +100,15 @@ const contactLine = computed(() => (document.value.contact_items ?? []).join(' â
 <style scoped>
 .step-panel {
   display: grid;
+  grid-template-rows: auto 1fr auto;
   gap: 22px;
-  padding: 32px;
+  height: 100%;
+  min-height: 0;
+  padding: 28px;
   border: 1px solid rgba(20, 33, 61, 0.12);
-  border-radius: 30px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 24px 52px rgba(20, 33, 61, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
 .step-kicker,
@@ -159,10 +166,17 @@ h4 {
   background: rgba(255, 244, 214, 0.86);
 }
 
-.overview-grid,
-.detail-grid {
+.review-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  min-height: 0;
+}
+
+.review-primary,
+.review-sidebar {
+  display: grid;
+  align-content: start;
   gap: 18px;
 }
 
@@ -170,12 +184,18 @@ h4 {
 .detail-card {
   padding: 22px;
   border: 1px solid rgba(20, 33, 61, 0.12);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 16px;
+  background: rgba(249, 249, 247, 0.96);
 }
 
 .hero-card {
   background: linear-gradient(135deg, rgba(251, 243, 221, 0.95), rgba(219, 234, 254, 0.9));
+}
+
+.profile-card {
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 14px;
 }
 
 .headline,
@@ -223,13 +243,12 @@ h4 {
 .timeline {
   display: grid;
   gap: 14px;
-  margin-top: 12px;
 }
 
 .skill-group,
 .timeline-item {
   padding: 16px;
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(20, 33, 61, 0.05);
 }
 
@@ -241,6 +260,26 @@ h4 {
 
 .timeline-item ul {
   padding-left: 20px;
+}
+
+.timeline-scroller,
+.skill-groups {
+  margin-top: 12px;
+}
+
+.timeline-scroller {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.step-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: auto;
+  padding-top: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 28px);
 }
 
 button {
@@ -265,16 +304,25 @@ button {
 @media (max-width: 840px) {
   .step-panel {
     padding: 24px;
+    height: auto;
   }
 
-  .overview-grid,
-  .detail-grid {
+  .profile-card {
+    max-height: none;
+    padding-right: 22px;
+  }
+
+  .review-grid {
     grid-template-columns: 1fr;
   }
 
   .panel-header,
   .step-actions {
     flex-direction: column;
+  }
+
+  .step-actions button {
+    width: 100%;
   }
 }
 </style>
