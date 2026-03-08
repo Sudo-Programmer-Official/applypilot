@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ActionMode, ImportedJob, PipelineResult, SkillInsight } from '../../types/wizard'
+import OptimizationInsights from './OptimizationInsights.vue'
+import type {
+  ActionMode,
+  ImportedJob,
+  KeywordAnalysis,
+  MetricSignal,
+  OptimizationDecision,
+  OptimizationScoreRow,
+  PipelineResult,
+  SkillInsight,
+} from '../../types/wizard'
 
 const props = defineProps<{
   mode: ActionMode
@@ -19,6 +29,13 @@ const props = defineProps<{
   projectedAts: number
   importedJob: ImportedJob | null
   fixApplied: boolean
+  qualityBefore: number
+  qualityAfter: number
+  scoreRows: OptimizationScoreRow[]
+  keptChanges: OptimizationDecision[]
+  rejectedChanges: OptimizationDecision[]
+  metricSignals: MetricSignal[]
+  keywordAnalysis: KeywordAnalysis | null
 }>()
 
 const emit = defineEmits<{
@@ -162,6 +179,19 @@ const topSkillsEmptyCopy = computed(() => {
           <li v-for="issue in displayedTopIssues" :key="issue">{{ issue }}</li>
         </ul>
       </article>
+
+      <OptimizationInsights
+        v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length"
+        title="Explainable optimization"
+        subtitle="ApplyPilot only keeps edits that improve score without reducing credibility."
+        :quality-before="qualityBefore"
+        :quality-after="qualityAfter"
+        :score-rows="scoreRows"
+        :kept-changes="keptChanges"
+        :rejected-changes="rejectedChanges"
+        :metric-signals="metricSignals"
+        :keyword-analysis="keywordAnalysis"
+      />
 
       <div class="step-actions">
         <button

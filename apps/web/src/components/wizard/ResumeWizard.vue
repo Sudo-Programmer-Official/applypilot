@@ -13,6 +13,10 @@ import type {
   DiffLine,
   ExperienceBulletComparison,
   ImportedJob,
+  KeywordAnalysis,
+  OptimizationDecision,
+  OptimizationScoreAxes,
+  OptimizationScoreRow,
   ParsedResume,
   PipelineResult,
   ReadinessBreakdown,
@@ -50,6 +54,16 @@ const breakdownLabels: Record<keyof ReadinessBreakdown, string> = {
   experience_strength: 'Experience Strength',
   impact_metrics: 'Impact Metrics',
   keyword_coverage: 'Keyword Coverage',
+}
+
+const optimizationAxisLabels: Record<keyof OptimizationScoreAxes, string> = {
+  jd_keyword_match: 'Keyword Alignment',
+  technical_strength: 'System Complexity',
+  metric_impact: 'Metric Impact',
+  technology_density: 'Technology Density',
+  action_verb_strength: 'Action Verb Strength',
+  readability: 'Readability',
+  credibility: 'Credibility',
 }
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
@@ -140,6 +154,39 @@ const projectedAts = computed(() => Math.max(
 ))
 const displayedAts = computed(() => (fixApplied.value ? projectedAts.value : currentAts.value))
 const readinessDelta = computed(() => Math.max(projectedReadiness.value - currentReadiness.value, 0))
+const optimizationMetadata = computed(() => result.value?.optimized?.metadata)
+const optimizationScores = computed(() => optimizationMetadata.value?.scores)
+const optimizationKeptChanges = computed<OptimizationDecision[]>(() => optimizationMetadata.value?.kept_changes ?? [])
+const optimizationRejectedChanges = computed<OptimizationDecision[]>(() => optimizationMetadata.value?.rejected_changes ?? [])
+const optimizationMetricSignals = computed(() => (
+  optimizationScores.value?.optimized?.metric_signals
+  ?? optimizationScores.value?.original?.metric_signals
+  ?? []
+))
+const optimizationKeywordAnalysis = computed<KeywordAnalysis | null>(() => (
+  optimizationScores.value?.optimized?.keyword_analysis
+  ?? optimizationScores.value?.original?.keyword_analysis
+  ?? null
+))
+const originalQualityScore = computed(() => Math.round(optimizationScores.value?.original?.total ?? 0))
+const optimizedQualityScore = computed(() => Math.round(
+  optimizationScores.value?.optimized?.total ?? optimizationScores.value?.original?.total ?? 0,
+))
+const optimizationScoreRows = computed<OptimizationScoreRow[]>(() => {
+  const originalAxes = optimizationScores.value?.original?.axes ?? {}
+  const optimizedAxes = optimizationScores.value?.optimized?.axes ?? originalAxes
+
+  return (Object.keys(optimizationAxisLabels) as Array<keyof OptimizationScoreAxes>)
+    .map((key) => ({
+      key,
+      label: optimizationAxisLabels[key],
+      before: Math.round(originalAxes[key] ?? 0),
+      after: Math.round(optimizedAxes[key] ?? originalAxes[key] ?? 0),
+    }))
+    .filter((row) => row.key !== 'credibility')
+    .filter((row) => row.before > 0 || row.after > 0)
+})
+const metricImpactRow = computed(() => optimizationScoreRows.value.find((row) => row.key === 'metric_impact') ?? null)
 const canAdvanceFromJobStep = computed(() => (
   mode.value === 'analyze' ? Boolean(jobDescription.value.trim()) : Boolean(suggestionsText.value.trim())
 ))
@@ -652,6 +699,10 @@ onBeforeUnmount(() => {
 
       <article v-if="result" class="sidebar-card metrics-card">
         <p class="sidebar-kicker">Live metrics</p>
+        <div v-if="optimizedQualityScore" class="mini-metric">
+          <span>Quality</span>
+          <strong>{{ originalQualityScore }} → {{ optimizedQualityScore }}</strong>
+        </div>
         <div class="mini-metric">
           <span>Readiness</span>
           <strong>{{ displayedReadiness }}</strong>
@@ -659,6 +710,10 @@ onBeforeUnmount(() => {
         <div class="mini-metric">
           <span>ATS</span>
           <strong>{{ displayedAts }}</strong>
+        </div>
+        <div v-if="metricImpactRow" class="mini-metric">
+          <span>Metric impact</span>
+          <strong>{{ metricImpactRow.before }} → {{ metricImpactRow.after }}</strong>
         </div>
         <div class="mini-metric" v-for="row in readinessBreakdownRows" :key="row.key">
           <span>{{ row.label }}</span>
@@ -726,6 +781,13 @@ onBeforeUnmount(() => {
         :projected-ats="projectedAts"
         :imported-job="importedJob"
         :fix-applied="fixApplied"
+        :quality-before="originalQualityScore"
+        :quality-after="optimizedQualityScore"
+        :score-rows="optimizationScoreRows"
+        :kept-changes="optimizationKeptChanges"
+        :rejected-changes="optimizationRejectedChanges"
+        :metric-signals="optimizationMetricSignals"
+        :keyword-analysis="optimizationKeywordAnalysis"
         @back="goToStep(3)"
         @run="runOptimization"
         @continue="continueToDownload"
@@ -748,6 +810,13 @@ onBeforeUnmount(() => {
         :preview-preparing="previewPreparing"
         :preview-failed="previewFailed"
         :preview-error-message="previewErrorMessage"
+        :quality-before="originalQualityScore"
+        :quality-after="optimizedQualityScore"
+        :score-rows="optimizationScoreRows"
+        :kept-changes="optimizationKeptChanges"
+        :rejected-changes="optimizationRejectedChanges"
+        :metric-signals="optimizationMetricSignals"
+        :keyword-analysis="optimizationKeywordAnalysis"
         @back="goToStep(4)"
         @preview="preparePdfPreview(true)"
         @download="downloadResume"

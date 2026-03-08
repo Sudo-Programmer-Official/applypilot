@@ -14,6 +14,78 @@ export interface ReadinessBreakdown {
   keyword_coverage?: number
 }
 
+export interface MetricSignal {
+  metric: string
+  category: 'scale' | 'performance' | 'business_impact' | 'quantity' | string
+  descriptor: string
+  label: string
+  impact_weight: number
+  context?: string
+}
+
+export interface KeywordMatchInsight {
+  keyword: string
+  score: number
+  level: 'strong' | 'weak' | 'missing' | string
+  section?: string
+  related_terms?: string[]
+  clusters?: string[]
+  metric_support?: boolean
+}
+
+export interface KeywordAnalysis {
+  strong_matches?: KeywordMatchInsight[]
+  weak_matches?: KeywordMatchInsight[]
+  missing_keywords?: string[]
+  cluster_matches?: string[]
+}
+
+export interface OptimizationScoreAxes {
+  jd_keyword_match?: number
+  technical_strength?: number
+  metric_impact?: number
+  technology_density?: number
+  action_verb_strength?: number
+  readability?: number
+  credibility?: number
+}
+
+export interface OptimizationScoreSnapshot {
+  total?: number
+  axes?: OptimizationScoreAxes
+  matched_job_keywords?: string[]
+  metric_signals?: MetricSignal[]
+  metric_breakdown?: Record<string, number>
+  keyword_analysis?: KeywordAnalysis
+}
+
+export interface OptimizationDecision {
+  id?: string
+  action?: string
+  type?: string
+  target_section?: string
+  value?: string
+  reason?: string
+  decision?: 'kept' | 'rejected' | string
+  decision_reason?: string
+  verification?: {
+    passed?: boolean
+    reasons?: string[]
+    codes?: string[]
+  }
+  scores?: {
+    before?: OptimizationScoreSnapshot
+    after?: OptimizationScoreSnapshot
+  }
+}
+
+export interface OptimizationScoreRow {
+  key: keyof OptimizationScoreAxes
+  label: string
+  before: number
+  after: number
+}
+
 export interface AnalysisResult {
   mode?: 'analysis' | 'suggestions'
   summary?: string
@@ -102,7 +174,18 @@ export interface PipelineResult {
   optimized: {
     text?: string
     document?: ResumeDocument
-    metadata?: { suggestions?: string[]; highlighted_keywords?: string[] }
+    metadata?: {
+      source?: string
+      suggestions?: string[]
+      highlighted_keywords?: string[]
+      optimization_plan?: OptimizationDecision[]
+      kept_changes?: OptimizationDecision[]
+      rejected_changes?: OptimizationDecision[]
+      scores?: {
+        original?: OptimizationScoreSnapshot
+        optimized?: OptimizationScoreSnapshot
+      }
+    }
   }
   diff: { unified?: string }
   ats_score: {

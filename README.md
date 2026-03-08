@@ -43,6 +43,7 @@ Vercel:
 - Set project root to `apps/web`.
 - Build command: `npm run build`
 - Output directory: `dist`
+- SPA rewrites are configured in `apps/web/vercel.json` so deep links like `/dashboard/wizard` load on refresh.
 - Set `VITE_API_BASE` to `https://api.tryapplypilot.com`.
 - Connect `tryapplypilot.com` and `www.tryapplypilot.com`.
 

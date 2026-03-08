@@ -111,6 +111,91 @@ class ResumeOptimizerTests(unittest.TestCase):
         self.assertNotIn("improving delivery quality", optimized_text.lower())
         self.assertIn("deployment effort by 40%", optimized_text)
 
+    def test_optimizer_only_adds_resume_backed_skills(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Software Engineer",
+                "Experience",
+                "Software Engineering Intern - Braintree Health May 2025 - Aug 2025",
+                "- Architected distributed backend services on AWS Lambda and RDS to process 11M+ records across 30-40 concurrent workers.",
+            ]
+        )
+        document = build_resume_document(resume_text)
+
+        optimized = optimize_resume(
+            resume_text,
+            "Backend Engineer\nRequirements:\n- AWS\n- FastAPI\n- Kubernetes",
+            resume_document=document,
+        )
+
+        optimized_document = ResumeDocument.model_validate(optimized["optimized_document"])
+        skills = [skill for values in optimized_document.skills.values() for skill in values]
+
+        self.assertIn("AWS", skills)
+        self.assertNotIn("FastAPI", skills)
+        self.assertNotIn("Kubernetes", skills)
+
+    def test_optimizer_adds_supported_ai_keyword_enrichment(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Software Engineer",
+                "Technical Skills",
+                "AI & Machine Learning: LLMs",
+                "Experience",
+                "Graduate Assistant - Computer Science, TAMU-CC Jan 2025 - May 2025",
+                "- Built an LLM-powered requirement traceability system to automate mapping between functional and quality requirements using semantic similarity techniques.",
+                "- Designed evaluation pipelines to benchmark AI-generated outputs against manual scoring frameworks.",
+            ]
+        )
+        document = build_resume_document(resume_text)
+
+        optimized = optimize_resume(
+            resume_text,
+            "ML Engineer\nRequirements:\n- LLMs\n- Model evaluation\n- AI systems",
+            resume_document=document,
+        )
+
+        optimized_document = ResumeDocument.model_validate(optimized["optimized_document"])
+        ai_skills = optimized_document.skills.get("AI & Machine Learning", [])
+
+        self.assertIn("Evaluation Pipelines", ai_skills)
+        self.assertIn("AI Systems", ai_skills)
+
+    def test_optimizer_returns_structured_kept_and_rejected_changes(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Distributed Systems Engineer | Cloud Data Infrastructure & Scalable Platforms",
+                "Distributed systems engineer designing fault-tolerant, horizontally scalable data platforms processing 10M+ records across high-concurrency cloud workloads.",
+                "Experience",
+                "Software Engineering Intern - Braintree Health May 2025 - Aug 2025",
+                "- Architected distributed backend services on AWS Lambda and RDS to process 11M+ records across 30-40 concurrent workers with fault-tolerant orchestration.",
+            ]
+        )
+        document = build_resume_document(resume_text)
+
+        optimized = optimize_resume(
+            resume_text,
+            "Senior Backend Engineer\nRequirements:\n- AWS\n- Distributed Systems\n- CI/CD",
+            resume_document=document,
+        )
+
+        self.assertIn("optimization_plan", optimized)
+        self.assertIn("kept_changes", optimized)
+        self.assertIn("rejected_changes", optimized)
+        self.assertIn("scores", optimized)
+        self.assertTrue(optimized["rejected_changes"])
+        self.assertIn("metric_impact", optimized["scores"]["optimized"]["axes"])
+        self.assertTrue(optimized["scores"]["optimized"]["metric_signals"])
+
+        summary_rejections = [
+            change for change in optimized["rejected_changes"] if change.get("action") == "rewrite_summary"
+        ]
+        self.assertTrue(summary_rejections)
+        self.assertIn("weakened", summary_rejections[0].get("decision_reason", "").lower())
+
 
 if __name__ == "__main__":
     unittest.main()

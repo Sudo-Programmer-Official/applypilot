@@ -1,5 +1,15 @@
 <script setup lang="ts">
-import type { DiffLine, ExperienceBulletComparison, ImportedJob, PipelineResult } from '../../types/wizard'
+import OptimizationInsights from './OptimizationInsights.vue'
+import type {
+  DiffLine,
+  ExperienceBulletComparison,
+  ImportedJob,
+  KeywordAnalysis,
+  MetricSignal,
+  OptimizationDecision,
+  OptimizationScoreRow,
+  PipelineResult,
+} from '../../types/wizard'
 
 const props = defineProps<{
   result: PipelineResult
@@ -16,6 +26,13 @@ const props = defineProps<{
   previewPreparing: boolean
   previewFailed: boolean
   previewErrorMessage: string
+  qualityBefore: number
+  qualityAfter: number
+  scoreRows: OptimizationScoreRow[]
+  keptChanges: OptimizationDecision[]
+  rejectedChanges: OptimizationDecision[]
+  metricSignals: MetricSignal[]
+  keywordAnalysis: KeywordAnalysis | null
 }>()
 
 const emit = defineEmits<{
@@ -53,7 +70,7 @@ const emit = defineEmits<{
         </div>
         <div class="metric-card">
           <span>Improvements applied</span>
-          <strong>{{ (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</strong>
+          <strong>{{ keptChanges.length || (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</strong>
         </div>
       </div>
     </div>
@@ -91,6 +108,19 @@ const emit = defineEmits<{
         <span>{{ previewFailed ? 'download fallback available' : 'same output as final PDF' }}</span>
       </article>
     </div>
+
+    <OptimizationInsights
+      v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length"
+      title="Optimization results"
+      subtitle="Review the score deltas, applied changes, rejected edits, and impact signals before exporting."
+      :quality-before="qualityBefore"
+      :quality-after="qualityAfter"
+      :score-rows="scoreRows"
+      :kept-changes="keptChanges"
+      :rejected-changes="rejectedChanges"
+      :metric-signals="metricSignals"
+      :keyword-analysis="keywordAnalysis"
+    />
 
     <article class="preview-card">
       <div class="card-head">
