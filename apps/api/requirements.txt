@@ -5,3 +5,9 @@ pdfplumber
 python-docx
 openai
 python-multipart
+jinja2
+weasyprint
+reportlab
+requests
+beautifulsoup4
+psycopg[binary]

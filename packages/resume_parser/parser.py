@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 import pdfplumber
 from docx import Document
+from packages.resume_formatter.builder import build_resume_document, summarize_resume_sections
 
 
 def parse_resume(file_path: str) -> Dict[str, Any]:
@@ -30,10 +31,13 @@ def parse_resume(file_path: str) -> Dict[str, Any]:
     else:
         raise ValueError(f"Unsupported resume format: {suffix}")
 
+    document = build_resume_document(text)
+
     return {
         "file_name": path.name,
         "text": text,
-        "sections": _extract_sections(text),
+        "sections": _extract_sections(document),
+        "document": document.model_dump(),
         "metadata": {"format": suffix.lstrip(".")},
     }
 
@@ -56,10 +60,6 @@ def _parse_docx(path: Path) -> str:
     return "\n".join(lines).strip()
 
 
-def _extract_sections(text: str) -> List[Dict[str, Any]]:
-    """
-    Placeholder section extractor.
-
-    Later this will detect sections like Experience, Education, Skills, Projects.
-    """
-    return []
+def _extract_sections(document: Any) -> List[Dict[str, Any]]:
+    """Summarize the structured resume sections for downstream consumers."""
+    return summarize_resume_sections(document)

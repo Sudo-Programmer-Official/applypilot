@@ -1,6 +1,7 @@
 """Deterministic placeholder optimizer for ApplyPilot's AI engine."""
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 from packages.job_intelligence.extractor import analyze_job_description, extract_resume_skills, keyword_names
@@ -46,14 +47,70 @@ def _seed_resume(job_keywords: List[str]) -> str:
     focus = ", ".join(job_keywords[:3]) or "target role keywords"
     return "\n".join(
         [
-            "PROFESSIONAL SUMMARY",
+            "Professional Summary",
             f"Targeted candidate profile aligned to {focus}.",
             "",
-            "SELECT EXPERIENCE HIGHLIGHTS",
+            "Experience",
             "- Led cross-functional delivery with measurable business impact.",
             "- Improved systems reliability and stakeholder communication.",
         ]
     )
+
+
+def _is_bullet(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("-") or stripped.startswith("*") or stripped.startswith("•")
+
+
+def _split_bullet(line: str) -> tuple[str, str]:
+    stripped = line.strip()
+    if stripped.startswith(("•", "-", "*")):
+        return stripped[0], stripped[1:].strip()
+    return "-", stripped
+
+
+def _stronger_opening(line: str) -> str:
+    replacements = {
+        "worked on": "Built",
+        "responsible for": "Owned",
+        "helped": "Supported",
+        "used": "Applied",
+        "built": "Architected",
+        "developed": "Engineered",
+    }
+    lowered = line.lower()
+    for old, new in replacements.items():
+        if lowered.startswith(old):
+            return f"{new}{line[len(old):]}"
+    return line
+
+
+def _compose_summary(job_keywords: List[str]) -> str:
+    if not job_keywords:
+        return "Distributed systems engineer focused on reliable backend delivery and measurable product impact."
+    focus = ", ".join(job_keywords[:4])
+    return f"Distributed systems engineer aligned to {focus}, with a focus on scalable backend delivery and reliability."
+
+
+def _enrich_bullet(line: str, missing_keywords: List[str], keyword_cursor: int) -> tuple[str, int]:
+    bullet = _stronger_opening(line.rstrip("."))
+    additions: List[str] = []
+
+    if keyword_cursor < len(missing_keywords):
+        additions.append(missing_keywords[keyword_cursor])
+        keyword_cursor += 1
+
+    if not any(char.isdigit() for char in bullet):
+        additions.append("reliability")
+
+    if additions:
+        bullet = f"{bullet} using {' and '.join(additions[:2])}"
+
+    if not re.search(r"(improv|reduc|increas|optim|accelerat)", bullet.lower()):
+        bullet = f"{bullet}, improving delivery quality"
+
+    bullet = bullet.strip().rstrip(".")
+    return f"{bullet}.", keyword_cursor
 
 
 def optimize_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
@@ -87,30 +144,26 @@ def optimize_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
     keyword_cursor = 0
     rewritten_lines = 0
 
-    if job_keywords:
-        focus_keywords = ", ".join(job_keywords[:4])
-        optimized_lines.extend(
-            [
-                "TARGET ROLE ALIGNMENT",
-                f"Positioned for opportunities requiring {focus_keywords}.",
-                "",
-            ]
-        )
-
     for line in original_lines:
         stripped = line.strip()
         if not stripped:
             optimized_lines.append("")
+            continue
+        if stripped.lower() == "professional summary" and job_keywords:
+            optimized_lines.append(stripped)
+            optimized_lines.append(_compose_summary(job_keywords))
             continue
         if _is_section_heading(stripped) or _should_preserve_line(stripped):
             optimized_lines.append(stripped)
             continue
 
         updated_line = stripped
-        if missing_keywords and keyword_cursor < len(missing_keywords):
-            updated_line = _inject_keyword(updated_line, missing_keywords[keyword_cursor])
-            keyword_cursor += 1
-        if rewritten_lines < 3:
+        if _is_bullet(stripped):
+            marker, bullet = _split_bullet(stripped)
+            updated_bullet, keyword_cursor = _enrich_bullet(bullet, missing_keywords, keyword_cursor)
+            updated_line = f"{marker} {updated_bullet}"
+            rewritten_lines += 1
+        elif rewritten_lines < 2:
             updated_line = _add_impact(updated_line)
             rewritten_lines += 1
         optimized_lines.append(updated_line)

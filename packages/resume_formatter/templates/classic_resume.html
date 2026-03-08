@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ resume.name or "ApplyPilot Resume" }}</title>
+  </head>
+  <body>
+    <header class="resume-header">
+      <h1 class="name">{{ resume.name }}</h1>
+      {% if resume.title %}
+      <p class="title">{{ resume.title }}</p>
+      {% endif %}
+      {% if resume.contact_items %}
+      <p class="contact">{{ resume.contact_items | join(" | ") }}</p>
+      {% endif %}
+      {% if resume.summary %}
+      <p class="summary">{{ resume.summary }}</p>
+      {% endif %}
+    </header>
+
+    {% if resume.education %}
+    <section class="section">
+      <h2>Education</h2>
+      {% for entry in resume.education %}
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">
+            <strong>{{ entry.school }}</strong>{% if entry.degree %}, {{ entry.degree }}{% endif %}
+          </div>
+          {% if entry.date %}
+          <div class="entry-date">{{ entry.date }}</div>
+          {% endif %}
+        </div>
+        {% if entry.details %}
+        <ul>
+          {% for detail in entry.details %}
+          <li>{{ detail }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if resume.skills %}
+    <section class="section">
+      <h2>Technical Skills</h2>
+      {% for category, values in resume.skills.items() %}
+      <p class="skill-line"><strong>{{ category }}:</strong> {{ values | join(", ") }}</p>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if resume.experience %}
+    <section class="section">
+      <h2>Experience</h2>
+      {% for entry in resume.experience %}
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">
+            <strong>{{ entry.role }}</strong>{% if entry.company %} - {{ entry.company }}{% endif %}
+          </div>
+          {% if entry.date %}
+          <div class="entry-date">{{ entry.date }}</div>
+          {% endif %}
+        </div>
+        {% if entry.bullets %}
+        <ul>
+          {% for bullet in entry.bullets %}
+          <li>{{ bullet }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if resume.projects %}
+    <section class="section">
+      <h2>Selected Projects</h2>
+      {% for entry in resume.projects %}
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title"><strong>{{ entry.name }}</strong>{% if entry.details %}: {{ entry.details }}{% endif %}</div>
+        </div>
+        {% if entry.bullets %}
+        <ul>
+          {% for bullet in entry.bullets %}
+          <li>{{ bullet }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+  </body>
+</html>

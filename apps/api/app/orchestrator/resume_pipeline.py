@@ -13,6 +13,7 @@ from packages.ats_score.scorer import calculate_ats_score
 from packages.diff_engine.diff_engine import generate_diff
 from packages.job_intelligence.extractor import analyze_job_description, extract_resume_skills, keyword_names
 from packages.readiness_score.scorer import calculate_application_readiness
+from packages.resume_formatter.builder import build_resume_document
 from packages.resume_parser.parser import parse_resume
 from packages.shared_types.pipeline_result import PipelineResult
 
@@ -83,6 +84,10 @@ def run_resume_pipeline(resume_path: str, job_description: Optional[str] = None)
     analysis = analyze_resume(parsed, job_description)
     optimized = optimize_resume(original_text, job_description or "")
     optimized_text = optimized.get("optimized_text", original_text)
+    optimized_document = build_resume_document(
+        optimized_text,
+        role_label=analysis.get("role_type", {}).get("label"),
+    )
 
     diff_text = generate_diff(original_text, optimized_text)
     current_ats = calculate_ats_score(original_text, job_description or "")
@@ -113,6 +118,7 @@ def run_resume_pipeline(resume_path: str, job_description: Optional[str] = None)
         analysis=analysis,
         optimized={
             "text": optimized_text,
+            "document": optimized_document.model_dump(),
             "metadata": optimized,
         },
         diff={"unified": diff_text},

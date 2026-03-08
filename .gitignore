@@ -10,3 +10,6 @@ __pycache__/
 
 # Env/config
 .env
+
+# Local app data
+apps/api/data/*.db

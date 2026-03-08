@@ -19,12 +19,15 @@ interface ReadinessBreakdown {
 }
 
 interface AnalysisResult {
+  mode?: 'analysis' | 'suggestions'
   summary?: string
   role_type?: { id: string; label: string }
   top_skills?: SkillInsight[]
   matched_skills?: SkillInsight[]
   missing_skills?: SkillInsight[]
   suggested_changes?: string[]
+  applied_changes?: string[]
+  unresolved_suggestions?: string[]
 }
 
 interface ReadinessResult {
@@ -58,6 +61,18 @@ interface DiffLine {
   value: string
 }
 
+interface ImportedJob {
+  url: string
+  source: string
+  title: string
+  company: string
+  location?: string
+  description: string
+  skills: string[]
+}
+
+type ActionMode = 'analyze' | 'suggestions'
+
 const exampleJobDescription = `Senior Backend Engineer
 
 We are hiring a backend engineer to build cloud services for a high-growth product. You will design microservices, improve distributed systems reliability, and partner with product and design teams.
@@ -68,6 +83,11 @@ Requirements:
 - Familiarity with PostgreSQL, REST APIs, and distributed systems
 - Ability to quantify impact, improve system reliability, and collaborate cross-functionally`
 
+const exampleSuggestions = `- Add Go and TypeScript to technical skills
+- Improve summary for backend platform roles
+- Quantify AWS Lambda work in the Braintree internship
+- Strengthen the first bullet in Braintree Health experience`
+
 const breakdownLabels: Record<keyof ReadinessBreakdown, string> = {
   skill_match: 'Skill Match',
   experience_strength: 'Experience Strength',
@@ -76,23 +96,36 @@ const breakdownLabels: Record<keyof ReadinessBreakdown, string> = {
 }
 
 const fileInput = ref<File | null>(null)
+const jobUrl = ref('')
 const jobDescription = ref('')
+const suggestionsText = ref('')
 const loading = ref(false)
+const importingJob = ref(false)
 const error = ref('')
 const result = ref<PipelineResult | null>(null)
+const importedJob = ref<ImportedJob | null>(null)
 const editableResumeText = ref('')
 const isEditingResume = ref(false)
 const copied = ref(false)
 const fixApplied = ref(false)
+const downloadingPdf = ref(false)
 const selectedMissingSkillName = ref<string | null>(null)
+const activeAction = ref<ActionMode>('analyze')
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
-const loadingStages = [
+const analyzeLoadingStages = [
   'Parsing resume',
   'Cleaning job description',
   'Detecting role type',
   'Scoring readiness',
   'Generating fixes',
+]
+const suggestionLoadingStages = [
+  'Parsing resume',
+  'Reading suggestions',
+  'Mapping resume sections',
+  'Applying structured edits',
+  'Preparing updated draft',
 ]
 
 const readinessRadius = 52
@@ -102,11 +135,18 @@ const loadingStageIndex = ref(0)
 let loadingTimer: number | null = null
 let copiedTimer: number | null = null
 
+const analysisMode = computed(() => result.value?.analysis?.mode ?? 'analysis')
+const isSuggestionMode = computed(() => analysisMode.value === 'suggestions')
+const loadingStages = computed(() => (
+  activeAction.value === 'suggestions' ? suggestionLoadingStages : analyzeLoadingStages
+))
 const roleLabel = computed(() => result.value?.analysis?.role_type?.label ?? 'Software Engineer')
-const currentLoadingStage = computed(() => loadingStages[loadingStageIndex.value] ?? loadingStages[0])
+const currentLoadingStage = computed(() => loadingStages.value[loadingStageIndex.value] ?? loadingStages.value[0])
 const topSkills = computed(() => result.value?.analysis?.top_skills ?? [])
 const matchedSkills = computed(() => result.value?.analysis?.matched_skills ?? [])
 const missingSkills = computed(() => result.value?.analysis?.missing_skills ?? [])
+const appliedChanges = computed(() => result.value?.analysis?.applied_changes ?? result.value?.analysis?.suggested_changes ?? [])
+const unresolvedSuggestions = computed(() => result.value?.analysis?.unresolved_suggestions ?? [])
 
 const selectedMissingSkill = computed(() => {
   if (!selectedMissingSkillName.value) {
@@ -138,6 +178,9 @@ const breakdownRows = computed(() =>
 )
 
 const displayedTopIssues = computed(() => {
+  if (isSuggestionMode.value) {
+    return appliedChanges.value.length ? appliedChanges.value : unresolvedSuggestions.value
+  }
   if (fixApplied.value) {
     return result.value?.application_readiness?.projected_top_issues ?? []
   }
@@ -183,13 +226,58 @@ const diffLines = computed<DiffLine[]>(() => {
     }))
 })
 
-const currentViewLabel = computed(() => (fixApplied.value ? 'After fixes' : 'Current resume'))
+const currentViewLabel = computed(() => {
+  if (isSuggestionMode.value) {
+    return fixApplied.value ? 'Suggestions applied' : 'Original resume'
+  }
+  return fixApplied.value ? 'After fixes' : 'Current resume'
+})
+const missingSkillsTitle = computed(() => (
+  isSuggestionMode.value ? 'Requested Skills Still Missing' : 'Missing Skills'
+))
+const fixPlanTitle = computed(() => (
+  isSuggestionMode.value ? 'Changes Applied' : 'Fix Plan'
+))
+const matchedSkillsLine = computed(() => (
+  isSuggestionMode.value
+    ? `Requested skills now on the resume: ${matchedSkills.value.map((skill) => skill.name).join(', ') || 'None detected'}`
+    : `Matched skills already on the resume: ${matchedSkills.value.map((skill) => skill.name).join(', ') || 'None yet'}`
+))
+const secondaryScoreLabel = computed(() => (
+  isSuggestionMode.value ? 'Resume Quality Proxy' : 'ATS Compatibility'
+))
+const resumePanelCopy = computed(() => (
+  isSuggestionMode.value
+    ? 'Suggestions are applied to the structured resume model before PDF export.'
+    : 'Apply fixes to switch from the current draft to the improved version.'
+))
+const importedJobSourceLabel = computed(() => {
+  const source = importedJob.value?.source ?? ''
+  if (!source) {
+    return ''
+  }
+  return source.charAt(0).toUpperCase() + source.slice(1)
+})
+const importedSkillCount = computed(() => importedJob.value?.skills.length ?? 0)
+const importedMatchedSkillCount = computed(() => {
+  if (!importedJob.value?.skills.length) {
+    return matchedSkills.value.length
+  }
+  const importedSkillSet = new Set(importedJob.value.skills)
+  return matchedSkills.value.filter((skill) => importedSkillSet.has(skill.name)).length
+})
+const importedMatchPercent = computed(() => {
+  if (!importedSkillCount.value) {
+    return 0
+  }
+  return Math.round((importedMatchedSkillCount.value / importedSkillCount.value) * 100)
+})
 
 function startLoadingTicker() {
   stopLoadingTicker()
   loadingStageIndex.value = 0
   loadingTimer = window.setInterval(() => {
-    if (loadingStageIndex.value < loadingStages.length - 1) {
+    if (loadingStageIndex.value < loadingStages.value.length - 1) {
       loadingStageIndex.value += 1
       return
     }
@@ -217,7 +305,12 @@ function onFileChange(event: Event) {
 }
 
 function useExampleJobDescription() {
+  importedJob.value = null
   jobDescription.value = exampleJobDescription
+}
+
+function useExampleSuggestions() {
+  suggestionsText.value = exampleSuggestions
 }
 
 function applyTopIssues() {
@@ -238,6 +331,54 @@ function showOriginalResume() {
   isEditingResume.value = false
 }
 
+async function submitResumeRequest(endpoint: string, form: FormData, mode: ActionMode) {
+  loading.value = true
+  activeAction.value = mode
+  startLoadingTicker()
+
+  try {
+    const response = await axios.post<{ result: PipelineResult }>(`${apiBase}${endpoint}`, form)
+    result.value = response.data?.result ?? null
+  } catch (unknownError: unknown) {
+    const fallbackMessage = mode === 'suggestions' ? 'Failed to apply suggestions.' : 'Failed to analyze resume.'
+    if (axios.isAxiosError(unknownError)) {
+      error.value = String(unknownError.response?.data?.detail ?? fallbackMessage)
+    } else {
+      error.value = fallbackMessage
+    }
+  } finally {
+    stopLoadingTicker()
+    loading.value = false
+  }
+}
+
+async function importJob() {
+  error.value = ''
+  importedJob.value = null
+
+  if (!jobUrl.value.trim()) {
+    error.value = 'Paste a job URL before importing.'
+    return
+  }
+
+  importingJob.value = true
+  try {
+    const response = await axios.post<ImportedJob>(`${apiBase}/job/import`, {
+      url: jobUrl.value.trim(),
+    })
+    importedJob.value = response.data
+    jobDescription.value = response.data.description
+  } catch (unknownError: unknown) {
+    if (axios.isAxiosError(unknownError)) {
+      error.value = String(unknownError.response?.data?.detail ?? 'Failed to import job posting.')
+    } else {
+      error.value = 'Failed to import job posting.'
+    }
+  } finally {
+    importingJob.value = false
+  }
+}
+
 async function analyze() {
   error.value = ''
   result.value = null
@@ -255,23 +396,32 @@ async function analyze() {
   const form = new FormData()
   form.append('file', fileInput.value)
   form.append('job_description', jobDescription.value.trim())
-
-  loading.value = true
-  startLoadingTicker()
-
-  try {
-    const response = await axios.post<{ result: PipelineResult }>(`${apiBase}/resume/analyze`, form)
-    result.value = response.data?.result ?? null
-  } catch (unknownError: unknown) {
-    if (axios.isAxiosError(unknownError)) {
-      error.value = String(unknownError.response?.data?.detail ?? 'Failed to analyze resume.')
-    } else {
-      error.value = 'Failed to analyze resume.'
-    }
-  } finally {
-    stopLoadingTicker()
-    loading.value = false
+  if (importedJob.value?.url) {
+    form.append('job_url', importedJob.value.url)
   }
+
+  await submitResumeRequest('/resume/analyze', form, 'analyze')
+}
+
+async function applySuggestions() {
+  error.value = ''
+  result.value = null
+
+  if (!fileInput.value) {
+    error.value = 'Choose a PDF or DOCX resume before applying suggestions.'
+    return
+  }
+
+  if (!suggestionsText.value.trim()) {
+    error.value = 'Paste at least one suggestion before applying changes.'
+    return
+  }
+
+  const form = new FormData()
+  form.append('file', fileInput.value)
+  form.append('suggestions', suggestionsText.value.trim())
+
+  await submitResumeRequest('/resume/apply-suggestions', form, 'suggestions')
 }
 
 async function copyResume() {
@@ -293,18 +443,45 @@ async function copyResume() {
   }
 }
 
-function downloadResume() {
+async function downloadResume() {
   const text = editableResumeText.value.trim()
   if (!text) {
     return
   }
 
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = fixApplied.value ? 'optimized_resume.txt' : 'resume_preview.txt'
-  link.click()
-  URL.revokeObjectURL(link.href)
+  downloadingPdf.value = true
+
+  try {
+    const response = await axios.post(`${apiBase}/resume/download`, {
+      resume_text: text,
+      file_name: result.value?.parsed?.file_name,
+      role_label: roleLabel.value,
+      use_optimized: fixApplied.value,
+    }, {
+      responseType: 'blob',
+    })
+
+    const blob = new Blob([response.data], { type: 'application/pdf' })
+    const link = document.createElement('a')
+    const objectUrl = URL.createObjectURL(blob)
+    link.href = objectUrl
+    link.download = fixApplied.value ? 'optimized_resume.pdf' : 'resume_preview.pdf'
+    link.click()
+    URL.revokeObjectURL(objectUrl)
+  } catch (unknownError: unknown) {
+    if (axios.isAxiosError(unknownError) && unknownError.response?.data instanceof Blob) {
+      try {
+        const errorPayload = JSON.parse(await unknownError.response.data.text())
+        error.value = String(errorPayload.detail ?? 'Failed to download resume PDF.')
+      } catch {
+        error.value = 'Failed to download resume PDF.'
+      }
+    } else {
+      error.value = 'Failed to download resume PDF.'
+    }
+  } finally {
+    downloadingPdf.value = false
+  }
 }
 
 function toggleEdit() {
@@ -312,8 +489,10 @@ function toggleEdit() {
 }
 
 watch(result, (nextResult) => {
-  fixApplied.value = false
-  editableResumeText.value = nextResult?.parsed?.text ?? ''
+  fixApplied.value = nextResult?.analysis?.mode === 'suggestions'
+  editableResumeText.value = fixApplied.value
+    ? nextResult?.optimized?.text ?? nextResult?.parsed?.text ?? ''
+    : nextResult?.parsed?.text ?? ''
   selectedMissingSkillName.value = nextResult?.analysis?.missing_skills?.[0]?.name ?? null
   isEditingResume.value = false
   copied.value = false
@@ -385,6 +564,22 @@ onBeforeUnmount(() => {
           </div>
           <button class="ghost small" type="button" @click="useExampleJobDescription">Use Example</button>
         </div>
+        <div class="job-import">
+          <input
+            v-model="jobUrl"
+            class="url-input"
+            type="url"
+            placeholder="Paste job link (optional)"
+          />
+          <button class="ghost small" type="button" @click="importJob" :disabled="importingJob">
+            {{ importingJob ? 'Importing...' : 'Import Link' }}
+          </button>
+        </div>
+        <div v-if="importedJob" class="import-card">
+          <strong>Imported from {{ importedJobSourceLabel }}</strong>
+          <p>{{ importedJob.company }}{{ importedJob.company && importedJob.title ? ' - ' : '' }}{{ importedJob.title }}</p>
+          <p v-if="importedJob.skills.length">Top skills: {{ importedJob.skills.slice(0, 6).join(', ') }}</p>
+        </div>
         <textarea
           v-model="jobDescription"
           rows="8"
@@ -393,14 +588,42 @@ onBeforeUnmount(() => {
       </article>
     </section>
 
+    <section class="workspace-secondary">
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-label">Optional</p>
+            <h2>Paste Improvement Suggestions</h2>
+          </div>
+          <button class="ghost small" type="button" @click="useExampleSuggestions">Use Example</button>
+        </div>
+        <p class="subtle">
+          Paste feedback from ChatGPT, a mentor, or a recruiter. ApplyPilot maps it to resume sections, applies the edits, and keeps the PDF ATS-safe.
+        </p>
+        <textarea
+          v-model="suggestionsText"
+          rows="5"
+          placeholder="Example:
+- Add Go to technical skills
+- Quantify AWS Lambda project impact
+- Improve first bullet in Braintree internship"
+        ></textarea>
+      </article>
+    </section>
+
     <section class="action-bar">
       <div>
         <p class="panel-label">Step 3</p>
-        <p class="action-copy">Run JD cleaning, role detection, readiness scoring, and a fix plan in one pass.</p>
+        <p class="action-copy">Run JD analysis or apply external resume suggestions without leaving the ATS-safe layout.</p>
       </div>
-      <button class="primary large" type="button" @click="analyze" :disabled="loading">
-        {{ loading ? 'Analyzing Resume...' : 'Analyze Resume' }}
-      </button>
+      <div class="action-buttons">
+        <button class="primary large" type="button" @click="analyze" :disabled="loading">
+          {{ loading && activeAction === 'analyze' ? 'Analyzing Resume...' : 'Analyze Resume' }}
+        </button>
+        <button class="secondary large" type="button" @click="applySuggestions" :disabled="loading">
+          {{ loading && activeAction === 'suggestions' ? 'Applying Suggestions...' : 'Apply Suggestions' }}
+        </button>
+      </div>
     </section>
 
     <section v-if="loading" class="loading-panel">
@@ -433,9 +656,20 @@ onBeforeUnmount(() => {
           <p class="eyebrow">Analysis complete</p>
           <h2>{{ roleLabel }} readiness review</h2>
           <p class="summary">{{ result.analysis.summary }}</p>
+          <p class="meta-line">Target role detected: {{ roleLabel }}</p>
+          <div v-if="importedJob && !isSuggestionMode" class="imported-job-header">
+            <span class="mode-pill">Imported from {{ importedJobSourceLabel }}</span>
+            <p class="meta-line">
+              {{ importedJob.company }}{{ importedJob.company && importedJob.title ? ' • ' : '' }}{{ importedJob.title }}
+            </p>
+          </div>
         </div>
         <div class="results-actions">
-          <button class="primary" type="button" @click="applyTopIssues" :disabled="fixApplied">Fix Top Issues</button>
+          <template v-if="isSuggestionMode">
+            <div v-if="fixApplied" class="mode-pill">Suggestions Applied</div>
+            <button v-else class="primary" type="button" @click="applyTopIssues">View Applied Version</button>
+          </template>
+          <button v-else class="primary" type="button" @click="applyTopIssues" :disabled="fixApplied">Fix Top Issues</button>
           <button v-if="fixApplied" class="ghost" type="button" @click="showOriginalResume">View Original</button>
         </div>
       </header>
@@ -467,7 +701,7 @@ onBeforeUnmount(() => {
             <p>{{ scoreTone.label }} for this role.</p>
             <p class="projection">Current: {{ currentReadiness }} | Projected: {{ projectedReadiness }}</p>
             <p v-if="readinessDelta > 0" class="projection delta">Fixes improve readiness by {{ readinessDelta }} points.</p>
-            <p class="projection">ATS Compatibility: {{ displayedAts }}</p>
+            <p class="projection">{{ secondaryScoreLabel }}: {{ displayedAts }}</p>
           </div>
         </article>
 
@@ -506,9 +740,26 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="detail-grid">
+        <article v-if="importedJob && !isSuggestionMode" class="card match-card">
+          <div class="card-head">
+            <h3>Resume Match</h3>
+            <span>{{ importedMatchedSkillCount }} / {{ importedSkillCount || topSkills.length }}</span>
+          </div>
+          <p class="metric-label">{{ importedMatchPercent }}% of imported job skills already covered</p>
+          <p class="meta-line">
+            {{ importedJob.company }}{{ importedJob.location ? ` • ${importedJob.location}` : '' }}
+          </p>
+          <p class="meta-line">
+            Skills already matched: {{ matchedSkills.map((skill) => skill.name).join(', ') || 'None yet' }}
+          </p>
+          <p v-if="importedJob.skills.length" class="meta-line">
+            Imported skills: {{ importedJob.skills.slice(0, 8).join(', ') }}
+          </p>
+        </article>
+
         <article class="card">
           <div class="card-head">
-            <h3>Missing Skills</h3>
+            <h3>{{ missingSkillsTitle }}</h3>
             <span>{{ missingSkills.length }}</span>
           </div>
           <div class="tag-list">
@@ -533,12 +784,12 @@ onBeforeUnmount(() => {
 
         <article class="card">
           <div class="card-head">
-            <h3>Fix Plan</h3>
+            <h3>{{ fixPlanTitle }}</h3>
           </div>
           <ul class="change-list">
             <li v-for="issue in displayedTopIssues" :key="issue">{{ issue }}</li>
           </ul>
-          <p class="meta-line">Matched skills already on the resume: {{ matchedSkills.map((skill) => skill.name).join(', ') || 'None yet' }}</p>
+          <p class="meta-line">{{ matchedSkillsLine }}</p>
         </article>
       </div>
 
@@ -559,12 +810,14 @@ onBeforeUnmount(() => {
           <div class="card-head toolbar">
             <div>
               <h3>{{ fixApplied ? 'Optimized Resume' : 'Current Resume Preview' }}</h3>
-              <p class="subtle">Apply fixes to switch from the current draft to the improved version.</p>
+              <p class="subtle">{{ resumePanelCopy }}</p>
             </div>
             <div class="toolbar-actions">
               <button class="ghost small" type="button" @click="toggleEdit">{{ isEditingResume ? 'Preview' : 'Edit' }}</button>
               <button class="ghost small" type="button" @click="copyResume">{{ copied ? 'Copied' : 'Copy' }}</button>
-              <button class="ghost small" type="button" @click="downloadResume">Download</button>
+              <button class="ghost small" type="button" @click="downloadResume" :disabled="downloadingPdf">
+                {{ downloadingPdf ? 'Preparing PDF...' : 'Download PDF' }}
+              </button>
             </div>
           </div>
 
@@ -594,6 +847,7 @@ onBeforeUnmount(() => {
 
 .hero,
 .workspace,
+.workspace-secondary,
 .action-bar,
 .loading-panel,
 .error-card,
@@ -728,6 +982,10 @@ h1 {
   margin-top: 26px;
 }
 
+.workspace-secondary {
+  margin-top: 20px;
+}
+
 .panel-label,
 .metric-label {
   margin: 0 0 8px;
@@ -774,6 +1032,7 @@ h1 {
 }
 
 textarea,
+.url-input,
 .resume-editor {
   width: 100%;
   border: 1px solid rgba(15, 23, 42, 0.14);
@@ -786,10 +1045,30 @@ textarea,
 }
 
 textarea:focus,
+.url-input:focus,
 .resume-editor:focus {
   outline: none;
   border-color: rgba(37, 99, 235, 0.44);
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.job-import {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.import-card {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  border-radius: 18px;
+  background: rgba(219, 234, 254, 0.42);
+}
+
+.import-card p + p {
+  margin-top: 4px;
 }
 
 .action-bar {
@@ -798,6 +1077,13 @@ textarea:focus,
   justify-content: space-between;
   gap: 18px;
   align-items: center;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
 }
 
 button {
@@ -890,6 +1176,23 @@ button:disabled {
   background: rgba(255, 255, 255, 0.18);
 }
 
+.mode-pill {
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 999px;
+  padding: 10px 14px;
+  color: #1d4ed8;
+  font-weight: 700;
+  background: rgba(219, 234, 254, 0.72);
+}
+
+.imported-job-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
 .error-card {
   margin-top: 20px;
   padding: 18px 22px;
@@ -927,6 +1230,10 @@ button:disabled {
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   margin-top: 18px;
+}
+
+.match-card .metric-label {
+  margin-top: 2px;
 }
 
 .bottom-grid {
@@ -1165,6 +1472,10 @@ button:disabled {
   .toolbar-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .job-import {
+    grid-template-columns: 1fr;
   }
 
   button {
