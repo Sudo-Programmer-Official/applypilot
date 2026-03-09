@@ -159,7 +159,7 @@ const missingSkills = computed(() => {
   const preferred = filteredExisting.filter((skill) => latestMissingNames.has(normalizeIdentity(skill.name)))
   return (preferred.length ? preferred : filteredExisting).slice(0, 8)
 })
-const appliedChanges = computed(() => result.value?.analysis?.applied_changes ?? result.value?.analysis?.suggested_changes ?? [])
+const appliedChanges = computed(() => analysisChangeList(result.value?.analysis))
 const unresolvedSuggestions = computed(() => result.value?.analysis?.unresolved_suggestions ?? [])
 const currentReadiness = computed(() => result.value?.application_readiness?.score ?? 0)
 const projectedReadiness = computed(() => Math.max(
@@ -300,11 +300,14 @@ const diffLines = computed<DiffLine[]>(() => {
 
   return rawDiff
     .split('\n')
-    .filter((line) => line.startsWith('+') || line.startsWith('-'))
+    .filter((line) => (
+      (line.startsWith('+') && !line.startsWith('+++'))
+      || (line.startsWith('-') && !line.startsWith('---'))
+    ))
     .slice(0, 8)
     .map((line) => ({
       type: line.startsWith('+') ? 'add' : 'remove',
-      value: line,
+      value: line.slice(1).trim(),
     }))
 })
 const displayedTopIssues = computed(() => {
@@ -554,6 +557,14 @@ function uniqueOrderedStrings(values: string[]) {
     seen.add(normalized)
     return true
   })
+}
+
+function analysisChangeList(analysis?: PipelineResult['analysis'] | null) {
+  const applied = analysis?.applied_changes ?? []
+  if (applied.length) {
+    return applied
+  }
+  return analysis?.suggested_changes ?? []
 }
 
 function formatExperienceHeading(entry: ResumeExperienceItem) {
@@ -1109,7 +1120,7 @@ async function applyBulletEdit() {
           missing: nextKeywordAnalysis.missing_keywords ?? [],
         } : result.value.analysis.keywords,
         applied_changes: mergeUniqueStrings(
-          result.value.analysis.applied_changes ?? result.value.analysis.suggested_changes ?? [],
+          analysisChangeList(result.value.analysis),
           [
             `Edited ${editingComparison.value.role_heading} bullet${typeof nextResult.edit.score_delta === 'number' ? ` (${nextResult.edit.score_delta >= 0 ? '+' : ''}${nextResult.edit.score_delta})` : ''}: ${nextResult.edit.reason || nextResult.edit.instruction}`,
           ],
@@ -1335,6 +1346,7 @@ onBeforeUnmount(() => {
         :score-rows="optimizationScoreRows"
         :kept-changes="optimizationKeptChanges"
         :rejected-changes="optimizationRejectedChanges"
+        :applied-changes="appliedChanges"
         :confidence="confidenceSnapshot"
         :metric-signals="optimizationMetricSignals"
         :keyword-analysis="optimizationKeywordAnalysis"

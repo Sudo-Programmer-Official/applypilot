@@ -39,6 +39,7 @@ const props = defineProps<{
   scoreRows: OptimizationScoreRow[]
   keptChanges: OptimizationDecision[]
   rejectedChanges: OptimizationDecision[]
+  appliedChanges: string[]
   confidence: ConfidenceSnapshot | null
   metricSignals: MetricSignal[]
   keywordAnalysis: KeywordAnalysis | null
@@ -134,7 +135,7 @@ function densityLabel(value: ResumeLayoutDensity) {
         </div>
         <div class="metric-card">
           <span>Improvements applied</span>
-          <strong>{{ keptChanges.length || (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</strong>
+          <strong>{{ Math.max(keptChanges.length, appliedChanges.length) }}</strong>
         </div>
       </div>
     </div>
@@ -310,13 +311,14 @@ function densityLabel(value: ResumeLayoutDensity) {
       <article class="detail-card">
         <div class="card-head">
           <h4>Why these changes</h4>
-          <span>{{ (result.analysis.applied_changes || result.analysis.suggested_changes || []).length }}</span>
+          <span>{{ appliedChanges.length }}</span>
         </div>
-        <ul class="change-list">
-          <li v-for="item in result.analysis.applied_changes || result.analysis.suggested_changes || []" :key="item">
+        <ul v-if="appliedChanges.length" class="change-list">
+          <li v-for="item in appliedChanges" :key="item">
             {{ item }}
           </li>
         </ul>
+        <p v-else class="empty-copy">No human-readable change summary was generated for this run.</p>
       </article>
 
       <article class="detail-card">
@@ -327,7 +329,7 @@ function densityLabel(value: ResumeLayoutDensity) {
         <div v-if="diffLines.length" class="diff-list">
           <div v-for="(line, index) in diffLines" :key="`${line.type}-${index}`" class="diff-line" :data-type="line.type">
             <span class="diff-label">{{ line.type === 'add' ? 'Added' : 'Removed' }}</span>
-            <code>{{ line.value.slice(1).trim() }}</code>
+            <code>{{ line.value }}</code>
           </div>
         </div>
         <p v-else class="empty-copy">No line-level diff was generated for this run.</p>
