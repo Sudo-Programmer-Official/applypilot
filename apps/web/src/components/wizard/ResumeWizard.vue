@@ -57,7 +57,7 @@ const breakdownLabels: Record<keyof ReadinessBreakdown, string> = {
 }
 
 const optimizationAxisLabels: Record<keyof OptimizationScoreAxes, string> = {
-  jd_keyword_match: 'Keyword Alignment',
+  jd_keyword_match: 'ATS Alignment',
   technical_strength: 'System Complexity',
   metric_impact: 'Metric Impact',
   technology_density: 'Technology Density',

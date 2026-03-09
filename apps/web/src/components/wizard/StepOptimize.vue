@@ -181,7 +181,7 @@ const topSkillsEmptyCopy = computed(() => {
       </article>
 
       <OptimizationInsights
-        v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length"
+        v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length || keywordAnalysis"
         title="Explainable optimization"
         subtitle="ApplyPilot only keeps edits that improve score without reducing credibility."
         :quality-before="qualityBefore"

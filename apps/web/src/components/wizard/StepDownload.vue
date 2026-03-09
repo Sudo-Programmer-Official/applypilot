@@ -110,7 +110,7 @@ const emit = defineEmits<{
     </div>
 
     <OptimizationInsights
-      v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length"
+      v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length || keywordAnalysis"
       title="Optimization results"
       subtitle="Review the score deltas, applied changes, rejected edits, and impact signals before exporting."
       :quality-before="qualityBefore"

@@ -167,7 +167,7 @@ function keywordSectionLabel(section?: string) {
             Cluster signals: {{ displayedKeywordClusters.join(', ') }}
           </p>
         </div>
-        <span>{{ displayedStrongMatches.length + displayedWeakMatches.length }}</span>
+        <span>{{ displayedStrongMatches.length + displayedWeakMatches.length + displayedMissingKeywords.length }}</span>
       </div>
 
       <div class="keyword-grid">
