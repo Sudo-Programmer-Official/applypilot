@@ -142,7 +142,19 @@ const topSkills = computed(() => {
   const analyzedSkills = result.value?.analysis?.top_skills ?? []
   return analyzedSkills.length ? analyzedSkills : importedTopSkills.value
 })
-const missingSkills = computed(() => result.value?.analysis?.missing_skills ?? [])
+const missingSkills = computed(() => {
+  const existing = result.value?.analysis?.missing_skills ?? []
+  const latestMissingNames = new Set((optimizationKeywordAnalysis.value?.missing_keywords ?? []).map(normalizeIdentity))
+  const matched = new Set(matchedSkillNames.value.map(normalizeIdentity))
+  const filteredExisting = existing.filter((skill) => !matched.has(normalizeIdentity(skill.name)))
+
+  if (!latestMissingNames.size) {
+    return filteredExisting
+  }
+
+  const preferred = filteredExisting.filter((skill) => latestMissingNames.has(normalizeIdentity(skill.name)))
+  return (preferred.length ? preferred : filteredExisting).slice(0, 8)
+})
 const appliedChanges = computed(() => result.value?.analysis?.applied_changes ?? result.value?.analysis?.suggested_changes ?? [])
 const unresolvedSuggestions = computed(() => result.value?.analysis?.unresolved_suggestions ?? [])
 const currentReadiness = computed(() => result.value?.application_readiness?.score ?? 0)
@@ -179,11 +191,16 @@ const matchedSkillNames = computed(() => uniqueOrderedStrings([
   ...((optimizationKeywordAnalysis.value?.strong_matches ?? []).map((match) => match.keyword)),
   ...((optimizationKeywordAnalysis.value?.weak_matches ?? []).map((match) => match.keyword)),
 ]).slice(0, 8))
-const missingSkillNames = computed(() => uniqueOrderedStrings([
-  ...((result.value?.analysis?.missing_skills ?? []).map((skill) => skill.name)),
-  ...(result.value?.analysis?.keywords?.missing ?? []),
-  ...(optimizationKeywordAnalysis.value?.missing_keywords ?? []),
-]).slice(0, 8))
+const missingSkillNames = computed(() => {
+  const matched = new Set(matchedSkillNames.value.map(normalizeIdentity))
+  return uniqueOrderedStrings([
+    ...((result.value?.analysis?.missing_skills ?? []).map((skill) => skill.name)),
+    ...(result.value?.analysis?.keywords?.missing ?? []),
+    ...(optimizationKeywordAnalysis.value?.missing_keywords ?? []),
+  ])
+    .filter((skill) => !matched.has(normalizeIdentity(skill)))
+    .slice(0, 8)
+})
 const extraStrengthNames = computed(() => {
   const tracked = new Set(
     uniqueOrderedStrings([
@@ -791,11 +808,20 @@ async function applyBulletEdit() {
     const nextResult = response.data.result
     const currentMetadata = result.value.optimized.metadata ?? {}
     const nextMetadata = nextResult.optimized.metadata ?? {}
+    const nextKeywordAnalysis = nextMetadata.scores?.optimized?.keyword_analysis
 
     result.value = {
       ...result.value,
       analysis: {
         ...result.value.analysis,
+        keywords: nextKeywordAnalysis ? {
+          ...(result.value.analysis.keywords ?? {}),
+          matched: [
+            ...(nextKeywordAnalysis.strong_matches ?? []).map((match) => match.keyword),
+            ...(nextKeywordAnalysis.weak_matches ?? []).map((match) => match.keyword),
+          ],
+          missing: nextKeywordAnalysis.missing_keywords ?? [],
+        } : result.value.analysis.keywords,
         applied_changes: mergeUniqueStrings(
           result.value.analysis.applied_changes ?? result.value.analysis.suggested_changes ?? [],
           [

@@ -87,6 +87,10 @@ const topSkillsEmptyCopy = computed(() => {
   }
   return 'Add a richer job description to extract high-signal role skills.'
 })
+
+const topSkillsHeading = computed(() => (
+  props.mode === 'suggestions' ? 'Detected skills' : 'Key job signals'
+))
 </script>
 
 <template>
@@ -154,7 +158,7 @@ const topSkillsEmptyCopy = computed(() => {
       <div class="analysis-grid">
         <article class="analysis-card">
           <div class="card-head">
-            <h4>Top skills</h4>
+            <h4>{{ topSkillsHeading }}</h4>
             <span>{{ topSkills.length }}</span>
           </div>
           <div v-if="topSkills.length" class="tag-list">
