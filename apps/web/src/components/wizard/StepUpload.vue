@@ -14,6 +14,7 @@ const emit = defineEmits<{
 
 const picker = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
+const hasFile = computed(() => Boolean(props.fileName))
 
 const fileSizeLabel = computed(() => {
   if (!props.fileSize) {
@@ -53,6 +54,7 @@ function handleDrop(event: DragEvent) {
     <div
       class="upload-dropzone"
       :data-dragging="dragging"
+      :data-ready="hasFile"
       @click="openPicker"
       @dragover.prevent="dragging = true"
       @dragleave.prevent="dragging = false"
@@ -66,10 +68,18 @@ function handleDrop(event: DragEvent) {
         @change="handleChange"
       />
 
-      <span class="upload-icon">+</span>
+      <span class="upload-icon">{{ hasFile ? '✓' : '+' }}</span>
       <strong>{{ fileName || 'Drag and drop your resume' }}</strong>
       <p>{{ fileSizeLabel }}</p>
       <button class="ghost" type="button">Choose File</button>
+    </div>
+
+    <div v-if="hasFile" class="upload-status" role="status" aria-live="polite">
+      <span class="status-mark">✓</span>
+      <div>
+        <strong>Upload complete</strong>
+        <p>{{ fileName }} is attached and ready for parser review.</p>
+      </div>
     </div>
 
     <div class="upload-notes">
@@ -141,6 +151,11 @@ h3 {
   box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.2);
 }
 
+.upload-dropzone[data-ready='true'] {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.96), rgba(244, 241, 232, 0.9));
+}
+
 .hidden-input {
   display: none;
 }
@@ -171,6 +186,38 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
+}
+
+.upload-status {
+  display: flex;
+  gap: 14px;
+  align-items: start;
+  padding: 16px 18px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.78), rgba(255, 250, 235, 0.82));
+}
+
+.status-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.upload-status strong {
+  display: block;
+  color: #14213d;
+}
+
+.upload-status p {
+  margin: 4px 0 0;
+  color: #5f6c80;
 }
 
 .upload-notes article {
@@ -221,6 +268,10 @@ button:disabled {
 
   .upload-notes {
     grid-template-columns: 1fr;
+  }
+
+  .upload-status {
+    padding: 14px 16px;
   }
 }
 </style>

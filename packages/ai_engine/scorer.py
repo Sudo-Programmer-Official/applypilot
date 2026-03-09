@@ -73,7 +73,13 @@ _SYSTEM_COMPLEXITY_TERMS = (
 
 _KEYWORD_VARIANT_HINTS = {
     "aws": (("aws",), ("amazon", "web", "services")),
+    "automation": (("automation",), ("automate",), ("automated",), ("automating",), ("automates",)),
+    "data analytics": (("data", "analytics"), ("data", "analysis"), ("analyze", "data"), ("analyzing", "data")),
+    "agentic ai": (("agentic", "ai"), ("ai", "tools"), ("agentic",)),
+    "ai automation": (("ai", "automation"), ("automation",), ("automated",), ("ai", "tools")),
+    "bash": (("bash",), ("shell", "script"), ("shell", "scripting")),
     "llms": (("llm",), ("llms",), ("large", "language", "model"), ("large", "language", "models")),
+    "machine learning": (("machine", "learning"), ("ml",)),
     "rest apis": (("rest", "api"), ("rest", "apis"), ("restful", "api"), ("restful", "apis"), ("api",), ("apis",)),
     "ci/cd": (("ci", "cd"), ("continuous", "integration"), ("continuous", "delivery"), ("continuous", "deployment")),
     "distributed systems": (("distributed", "systems"), ("distributed", "system"), ("distributed",)),
@@ -84,6 +90,10 @@ _KEYWORD_VARIANT_HINTS = {
 }
 
 _RELATED_CONTEXT_TERMS = {
+    "automation": {"automated", "scripts", "script", "workflow", "workflows", "ci", "cd", "bash", "tools"},
+    "data analytics": {"data", "analyze", "analysis", "analytics", "network", "anomalies", "insights"},
+    "agentic ai": {"agentic", "ai", "automation", "tools", "troubleshooting", "anomalies", "insights"},
+    "ai automation": {"agentic", "ai", "automation", "tools", "workflows", "scripts"},
     "distributed systems": {"distributed", "scalable", "concurrent", "parallel", "workers", "cluster", "sharding", "fault", "tolerant", "backend"},
     "aws": {"lambda", "s3", "rds", "cloudwatch", "serverless", "cloud", "ec2"},
     "llms": {"prompt", "embedding", "retrieval", "semantic", "evaluation", "inference", "rag", "ai"},
@@ -96,6 +106,8 @@ _RELATED_CONTEXT_TERMS = {
 }
 
 _KEYWORD_CLUSTERS = {
+    "automation_tools": {"automation", "automated", "automating", "script", "scripts", "workflow", "workflows", "bash", "tools"},
+    "agentic_ai": {"agentic", "ai", "automation", "tools", "analytics", "troubleshooting", "insights"},
     "distributed_systems": {"distributed", "parallel", "concurrency", "concurrent", "sharding", "workers", "cluster", "fault", "tolerant"},
     "aws_cloud": {"aws", "lambda", "rds", "s3", "cloudwatch", "serverless", "cloud"},
     "llm_systems": {"llm", "llms", "prompt", "embedding", "retrieval", "semantic", "evaluation", "inference"},
@@ -104,6 +116,11 @@ _KEYWORD_CLUSTERS = {
 }
 
 _KEYWORD_CLUSTER_MAP = {
+    "automation": ("automation_tools",),
+    "agentic ai": ("agentic_ai", "automation_tools"),
+    "ai automation": ("agentic_ai", "automation_tools"),
+    "data analytics": ("agentic_ai", "data_platform"),
+    "bash": ("automation_tools",),
     "distributed systems": ("distributed_systems", "backend_platform"),
     "aws": ("aws_cloud",),
     "llms": ("llm_systems",),
@@ -112,6 +129,14 @@ _KEYWORD_CLUSTER_MAP = {
     "data pipelines": ("data_platform",),
     "docker": ("backend_platform",),
     "kubernetes": ("distributed_systems",),
+}
+
+_TOKEN_FAMILIES = {
+    "automation": {"automation", "automate", "automated", "automating", "automates"},
+    "analytics": {"analytics", "analysis", "analyze", "analyzing", "analyzed", "analytic"},
+    "optimize": {"optimize", "optimized", "optimizing", "optimization"},
+    "script": {"script", "scripts", "scripting"},
+    "workflow": {"workflow", "workflows"},
 }
 
 
@@ -505,6 +530,8 @@ def _keyword_variants(keyword: str) -> List[List[str]]:
         if len(base_tokens) > 1 and base_tokens[0] not in {"continuous", "amazon"}:
             variants.append([base_tokens[0]])
 
+        variants.extend(_expanded_family_variants(base_tokens))
+
     deduped: List[List[str]] = []
     seen = set()
     for variant in variants:
@@ -514,6 +541,26 @@ def _keyword_variants(keyword: str) -> List[List[str]]:
         seen.add(key)
         deduped.append(variant)
     return deduped
+
+
+def _expanded_family_variants(tokens: List[str]) -> List[List[str]]:
+    if not tokens:
+        return []
+
+    expansions: List[List[str]] = []
+    if len(tokens) == 1:
+        for token in _TOKEN_FAMILIES.get(tokens[0], {tokens[0]}):
+            expansions.append([token])
+        return expansions
+
+    last_token_family = _TOKEN_FAMILIES.get(tokens[-1], {tokens[-1]})
+    for token in last_token_family:
+        expansions.append([*tokens[:-1], token])
+
+    if tokens == ["data", "analytics"]:
+        expansions.extend([["analyze", "data"], ["analyzing", "data"]])
+
+    return expansions
 
 
 def _find_keyword_occurrences(tokens: List[str], variants: List[List[str]]) -> List[tuple[int, int]]:

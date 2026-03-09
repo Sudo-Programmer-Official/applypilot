@@ -75,6 +75,34 @@ CREATE TABLE IF NOT EXISTS optimized_resumes (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS resume_versions (
+    id SERIAL PRIMARY KEY,
+    parsed_resume_id INTEGER REFERENCES parsed_resumes(id) ON DELETE CASCADE,
+    parent_version_id INTEGER,
+    version_number INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    resume_text TEXT NOT NULL,
+    document_json JSONB NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(parsed_resume_id, version_number)
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_resume_versions_parent_version'
+    ) THEN
+        ALTER TABLE resume_versions
+        ADD CONSTRAINT fk_resume_versions_parent_version
+        FOREIGN KEY (parent_version_id)
+        REFERENCES resume_versions(id)
+        ON DELETE SET NULL;
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_job_cache_expires_at
 ON job_cache(expires_at);
 
@@ -92,3 +120,9 @@ ON resume_analysis(parsed_resume_id);
 
 CREATE INDEX IF NOT EXISTS idx_optimized_resumes_analysis_id
 ON optimized_resumes(analysis_id);
+
+CREATE INDEX IF NOT EXISTS idx_resume_versions_parsed_resume_id
+ON resume_versions(parsed_resume_id);
+
+CREATE INDEX IF NOT EXISTS idx_resume_versions_parent_version_id
+ON resume_versions(parent_version_id);

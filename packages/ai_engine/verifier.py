@@ -77,7 +77,7 @@ def verify_change(
             checks["jd_relevance"] = False
             reasons.append("Skill addition is not tied back to the job description.")
 
-    if action == "rewrite_experience_bullet":
+    if action in {"rewrite_experience_bullet", "manual_edit_experience_bullet"}:
         before_value = str(applied_change.get("before_value") or "")
         after_value = str(applied_change.get("after_value") or "")
         bullet_index = int(applied_change.get("target", {}).get("bullet_index", -1))

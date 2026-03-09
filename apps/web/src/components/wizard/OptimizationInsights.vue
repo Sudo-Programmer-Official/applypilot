@@ -13,6 +13,11 @@ const props = defineProps<{
   rejectedChanges: OptimizationDecision[]
   metricSignals: MetricSignal[]
   keywordAnalysis: KeywordAnalysis | null
+  matchedSkillNames: string[]
+  missingSkillNames: string[]
+  extraStrengthNames: string[]
+  jobMatchTitle: string
+  jobMatchNarrative: string
 }>()
 
 const showQualityChip = computed(() => props.qualityBefore > 0 || props.qualityAfter > 0 || props.scoreRows.length > 0)
@@ -25,6 +30,35 @@ const displayedStrongMatches = computed(() => props.keywordAnalysis?.strong_matc
 const displayedWeakMatches = computed(() => props.keywordAnalysis?.weak_matches?.slice(0, 4) ?? [])
 const displayedMissingKeywords = computed(() => props.keywordAnalysis?.missing_keywords?.slice(0, 4) ?? [])
 const displayedKeywordClusters = computed(() => props.keywordAnalysis?.cluster_matches?.slice(0, 3) ?? [])
+const displayedMatchedSkillNames = computed(() => props.matchedSkillNames.slice(0, 6))
+const displayedMissingSkillNames = computed(() => props.missingSkillNames.slice(0, 6))
+const displayedExtraStrengthNames = computed(() => props.extraStrengthNames.slice(0, 6))
+const recommendedImprovements = computed(() => props.missingSkillNames.slice(0, 3).map((skill) => suggestImprovement(skill)))
+const displayedDetectedKeywords = computed(() => {
+  const strong = (props.keywordAnalysis?.strong_matches ?? []).map((match) => ({
+    keyword: match.keyword,
+    status: 'matched',
+  }))
+  const weak = (props.keywordAnalysis?.weak_matches ?? []).map((match) => ({
+    keyword: match.keyword,
+    status: 'partial',
+  }))
+  const missing = (props.keywordAnalysis?.missing_keywords ?? []).map((keyword) => ({
+    keyword,
+    status: 'missing',
+  }))
+
+  const ordered = [...strong, ...weak, ...missing]
+  const seen = new Set<string>()
+  return ordered.filter((item) => {
+    const key = item.keyword.toLowerCase()
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  }).slice(0, 12)
+})
 
 function formatDecision(change: OptimizationDecision, mode: 'kept' | 'rejected') {
   const action = change.action ?? ''
@@ -95,6 +129,23 @@ function keywordSectionLabel(section?: string) {
   }
   return labels[section] ?? section.replace(/_/g, ' ')
 }
+
+function suggestImprovement(skill: string) {
+  const normalized = skill.toLowerCase()
+  if (normalized.includes('bash') || normalized.includes('unix')) {
+    return `Surface ${skill} in an automation or tooling bullet if you have direct experience with it.`
+  }
+  if (normalized.includes('analytics') || normalized.includes('data')) {
+    return `Call out ${skill} in the summary, skills section, or a pipeline-focused bullet.`
+  }
+  if (normalized.includes('ai') || normalized.includes('llm')) {
+    return `Make ${skill} explicit in AI tooling, evaluation, or project work.`
+  }
+  if (normalized.includes('api') || normalized.includes('backend')) {
+    return `Highlight ${skill} in the first experience bullet where backend ownership is strongest.`
+  }
+  return `Add clearer evidence for ${skill} in the summary, skills section, or a relevant experience bullet.`
+}
 </script>
 
 <template>
@@ -120,6 +171,56 @@ function keywordSectionLabel(section?: string) {
         <small :data-positive="row.after > row.before">{{ row.after > row.before ? `▲ +${row.after - row.before}` : 'No change' }}</small>
       </article>
     </div>
+
+    <article
+      v-if="displayedMatchedSkillNames.length || displayedMissingSkillNames.length || displayedExtraStrengthNames.length"
+      class="match-report"
+    >
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Job match report</p>
+          <h5>{{ jobMatchTitle }}</h5>
+          <p class="subtitle">{{ jobMatchNarrative }}</p>
+        </div>
+        <span>{{ displayedMatchedSkillNames.length + displayedMissingSkillNames.length }}</span>
+      </div>
+
+      <div class="match-grid">
+        <article class="match-column matched-column">
+          <h6>Matched skills</h6>
+          <ul v-if="displayedMatchedSkillNames.length" class="insight-list positive-list">
+            <li v-for="skill in displayedMatchedSkillNames" :key="`matched-${skill}`">{{ skill }}</li>
+          </ul>
+          <p v-else class="empty-copy">No confirmed matched skills yet.</p>
+        </article>
+
+        <article class="match-column missing-column">
+          <h6>Missing signals</h6>
+          <ul v-if="displayedMissingSkillNames.length" class="insight-list caution-list">
+            <li v-for="skill in displayedMissingSkillNames" :key="`missing-signal-${skill}`">{{ skill }}</li>
+          </ul>
+          <p v-else class="empty-copy">No tracked gaps detected for this role.</p>
+        </article>
+
+        <article class="match-column extra-column">
+          <h6>Extra strengths</h6>
+          <ul v-if="displayedExtraStrengthNames.length" class="insight-list signal-list">
+            <li v-for="skill in displayedExtraStrengthNames" :key="`extra-${skill}`">{{ skill }}</li>
+          </ul>
+          <p v-else class="empty-copy">No additional resume strengths surfaced beyond the tracked job signals.</p>
+        </article>
+      </div>
+
+      <div v-if="recommendedImprovements.length" class="improvement-panel">
+        <div class="panel-head">
+          <h5>Recommended improvements</h5>
+          <span>{{ recommendedImprovements.length }}</span>
+        </div>
+        <ul class="insight-list neutral-list">
+          <li v-for="item in recommendedImprovements" :key="item">{{ item }}</li>
+        </ul>
+      </div>
+    </article>
 
     <div class="insight-columns">
       <article class="insight-panel">
@@ -168,6 +269,18 @@ function keywordSectionLabel(section?: string) {
           </p>
         </div>
         <span>{{ displayedStrongMatches.length + displayedWeakMatches.length + displayedMissingKeywords.length }}</span>
+      </div>
+
+      <div v-if="displayedDetectedKeywords.length" class="detected-keywords">
+        <span
+          v-for="item in displayedDetectedKeywords"
+          :key="`detected-${item.keyword}`"
+          class="detected-chip"
+          :data-state="item.status"
+        >
+          <strong>{{ item.keyword }}</strong>
+          <small>{{ item.status === 'matched' ? 'Matched' : item.status === 'partial' ? 'Partial' : 'Missing' }}</small>
+        </span>
       </div>
 
       <div class="keyword-grid">
@@ -278,7 +391,8 @@ h5 {
 }
 
 .score-grid,
-.insight-columns {
+.insight-columns,
+.match-grid {
   display: grid;
   gap: 12px;
 }
@@ -291,11 +405,49 @@ h5 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.match-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .score-tile,
-.insight-panel {
+.insight-panel,
+.match-report,
+.match-column,
+.improvement-panel {
   padding: 16px;
   border-radius: 20px;
   background: rgba(20, 33, 61, 0.05);
+}
+
+.match-report {
+  display: grid;
+  gap: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(219, 234, 254, 0.28));
+}
+
+.match-column h6 {
+  margin: 0;
+  color: #14213d;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.matched-column {
+  background: rgba(220, 252, 231, 0.48);
+}
+
+.missing-column {
+  background: rgba(255, 247, 237, 0.72);
+}
+
+.extra-column {
+  background: rgba(219, 234, 254, 0.58);
+}
+
+.improvement-panel {
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .panel-head span {
@@ -331,6 +483,46 @@ h5 {
   gap: 12px;
 }
 
+.detected-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+
+.detected-chip {
+  display: inline-grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(20, 33, 61, 0.06);
+}
+
+.detected-chip strong {
+  color: #14213d;
+  font-size: 0.9rem;
+}
+
+.detected-chip small {
+  color: #5f6c80;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.detected-chip[data-state='matched'] {
+  background: rgba(220, 252, 231, 0.8);
+}
+
+.detected-chip[data-state='partial'] {
+  background: rgba(254, 215, 170, 0.48);
+}
+
+.detected-chip[data-state='missing'] {
+  background: rgba(219, 234, 254, 0.7);
+}
+
 .keyword-column h6 {
   margin: 0;
   color: #14213d;
@@ -359,7 +551,8 @@ h5 {
   }
 
   .insight-columns,
-  .keyword-grid {
+  .keyword-grid,
+  .match-grid {
     grid-template-columns: 1fr;
   }
 }

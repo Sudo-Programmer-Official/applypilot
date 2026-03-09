@@ -109,6 +109,31 @@ class ResumeScorerTests(unittest.TestCase):
         self.assertIn("Distributed Systems", score["keyword_analysis"]["missing_keywords"])
         self.assertIn("Event-Driven Systems", score["keyword_analysis"]["missing_keywords"])
 
+    def test_scorer_matches_lightweight_keyword_variants(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Software Engineer",
+                "Experience",
+                "Software Engineer - Example Corp Jan 2023 - Present",
+                "- Automated CI/CD workflows and analyzed network data to improve deployment reliability.",
+            ]
+        )
+
+        score = score_resume(
+            build_resume_document(resume_text),
+            [
+                {"name": "Automation", "category": "methodology", "suggested_sections": []},
+                {"name": "Data Analytics", "category": "data", "suggested_sections": []},
+            ],
+        )
+
+        matched = {item["keyword"] for item in score["keyword_analysis"]["strong_matches"] + score["keyword_analysis"]["weak_matches"]}
+        self.assertIn("Automation", matched)
+        self.assertIn("Data Analytics", matched)
+        self.assertNotIn("Automation", score["keyword_analysis"]["missing_keywords"])
+        self.assertNotIn("Data Analytics", score["keyword_analysis"]["missing_keywords"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,6 +103,10 @@ const previewFailed = ref(false)
 const previewErrorMessage = ref('')
 const previewPdfUrl = ref('')
 const previewPdfBlob = ref<Blob | null>(null)
+const editingComparison = ref<ExperienceBulletComparison | null>(null)
+const editInstruction = ref('')
+const editError = ref('')
+const applyingEdit = ref(false)
 const activeAction = ref<ActionMode>('analyze')
 const loadingStageIndex = ref(0)
 
@@ -155,6 +159,7 @@ const projectedAts = computed(() => Math.max(
 const displayedAts = computed(() => (fixApplied.value ? projectedAts.value : currentAts.value))
 const readinessDelta = computed(() => Math.max(projectedReadiness.value - currentReadiness.value, 0))
 const optimizationMetadata = computed(() => result.value?.optimized?.metadata)
+const currentVersionSnapshot = computed(() => optimizationMetadata.value?.version_snapshot ?? null)
 const optimizationScores = computed(() => optimizationMetadata.value?.scores)
 const optimizationKeptChanges = computed<OptimizationDecision[]>(() => optimizationMetadata.value?.kept_changes ?? [])
 const optimizationRejectedChanges = computed<OptimizationDecision[]>(() => optimizationMetadata.value?.rejected_changes ?? [])
@@ -168,6 +173,58 @@ const optimizationKeywordAnalysis = computed<KeywordAnalysis | null>(() => (
   ?? optimizationScores.value?.original?.keyword_analysis
   ?? null
 ))
+const matchedSkillNames = computed(() => uniqueOrderedStrings([
+  ...((result.value?.analysis?.matched_skills ?? []).map((skill) => skill.name)),
+  ...(result.value?.analysis?.keywords?.matched ?? []),
+  ...((optimizationKeywordAnalysis.value?.strong_matches ?? []).map((match) => match.keyword)),
+  ...((optimizationKeywordAnalysis.value?.weak_matches ?? []).map((match) => match.keyword)),
+]).slice(0, 8))
+const missingSkillNames = computed(() => uniqueOrderedStrings([
+  ...((result.value?.analysis?.missing_skills ?? []).map((skill) => skill.name)),
+  ...(result.value?.analysis?.keywords?.missing ?? []),
+  ...(optimizationKeywordAnalysis.value?.missing_keywords ?? []),
+]).slice(0, 8))
+const extraStrengthNames = computed(() => {
+  const tracked = new Set(
+    uniqueOrderedStrings([
+      ...matchedSkillNames.value,
+      ...missingSkillNames.value,
+      ...topSkills.value.map((skill) => skill.name),
+    ]).map(normalizeIdentity),
+  )
+  const documentSkills = Object.values(result.value?.optimized?.document?.skills ?? result.value?.parsed?.document?.skills ?? {})
+    .flat()
+    .filter(Boolean)
+
+  return uniqueOrderedStrings(documentSkills)
+    .filter((skill) => !tracked.has(normalizeIdentity(skill)))
+    .slice(0, 8)
+})
+const jobMatchTitle = computed(() => {
+  if (importedJob.value?.company || importedJob.value?.title) {
+    const company = importedJob.value?.company?.trim()
+    const title = importedJob.value?.title?.trim()
+    return [company, title].filter(Boolean).join(' - ')
+  }
+  return roleLabel.value
+})
+const jobMatchNarrative = computed(() => {
+  const matched = matchedSkillNames.value
+  const missing = missingSkillNames.value
+  const extra = extraStrengthNames.value
+
+  const matchedLine = matched.length
+    ? `Your resume already shows ${matched.slice(0, 3).join(', ')}.`
+    : 'The imported job still needs stronger signal extraction before we can confirm the strongest matches.'
+  const missingLine = missing.length
+    ? `To improve this application, surface ${missing.slice(0, 3).join(', ')} more explicitly.`
+    : 'No major tracked gaps were detected in the current job match set.'
+  const extraLine = extra.length
+    ? `Extra strengths like ${extra.slice(0, 2).join(' and ')} make the profile more defensible for this role.`
+    : ''
+
+  return [matchedLine, missingLine, extraLine].filter(Boolean).join(' ')
+})
 const originalQualityScore = computed(() => Math.round(optimizationScores.value?.original?.total ?? 0))
 const optimizedQualityScore = computed(() => Math.round(
   optimizationScores.value?.optimized?.total ?? optimizationScores.value?.original?.total ?? 0,
@@ -268,6 +325,8 @@ const changedBulletComparisons = computed<ExperienceBulletComparison[]>(() => {
 
       pairs.push({
         id: `${entryIndex}-${bulletIndex}`,
+        entry_index: entryIndex,
+        bullet_index: bulletIndex,
         role_heading: formatExperienceHeading(pair.optimized),
         original,
         optimized,
@@ -284,6 +343,18 @@ function normalizeComparisonText(value: string) {
 
 function normalizeIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function uniqueOrderedStrings(values: string[]) {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const normalized = normalizeIdentity(value)
+    if (!normalized || seen.has(normalized)) {
+      return false
+    }
+    seen.add(normalized)
+    return true
+  })
 }
 
 function formatExperienceHeading(entry: ResumeExperienceItem) {
@@ -340,6 +411,9 @@ function clearResultState() {
   result.value = null
   fixApplied.value = false
   editableResumeText.value = ''
+  editingComparison.value = null
+  editInstruction.value = ''
+  editError.value = ''
   revokePreviewPdf()
   previewPreparing.value = false
   previewFailed.value = false
@@ -655,11 +729,132 @@ async function regenerateOptimization() {
   await preparePdfPreview(true)
 }
 
+function openBulletEdit(comparison: ExperienceBulletComparison, presetInstruction = '') {
+  editingComparison.value = comparison
+  editInstruction.value = presetInstruction
+  editError.value = ''
+}
+
+function closeBulletEdit() {
+  if (applyingEdit.value) {
+    return
+  }
+  editingComparison.value = null
+  editInstruction.value = ''
+  editError.value = ''
+}
+
+function mergeUniqueStrings(existing: string[] = [], incoming: string[] = []) {
+  return [...new Set([...existing, ...incoming].filter(Boolean))]
+}
+
+async function applyBulletEdit() {
+  if (!result.value || !parsedResume.value?.document || !result.value.optimized?.document || !editingComparison.value) {
+    return
+  }
+  if (!editInstruction.value.trim()) {
+    editError.value = 'Describe how the bullet should change.'
+    return
+  }
+
+  applyingEdit.value = true
+  editError.value = ''
+
+  try {
+    const response = await axios.post<{
+      result: {
+        optimized: PipelineResult['optimized']
+        diff: PipelineResult['diff']
+        ats_score: PipelineResult['ats_score']
+        application_readiness: PipelineResult['application_readiness']
+        edit: {
+          instruction: string
+          after: string
+          reason?: string
+          score_delta?: number
+        }
+      }
+    }>(`${apiBase}/resume/edit`, {
+      original_document: parsedResume.value.document,
+      current_document: result.value.optimized.document,
+      instruction: editInstruction.value.trim(),
+      job_description: jobDescription.value.trim(),
+      parsed_resume_id: result.value.parsed.id,
+      parent_version_id: currentVersionSnapshot.value?.id,
+      target: {
+        section: 'experience',
+        entry_index: editingComparison.value.entry_index,
+        bullet_index: editingComparison.value.bullet_index,
+      },
+    })
+
+    const nextResult = response.data.result
+    const currentMetadata = result.value.optimized.metadata ?? {}
+    const nextMetadata = nextResult.optimized.metadata ?? {}
+
+    result.value = {
+      ...result.value,
+      analysis: {
+        ...result.value.analysis,
+        applied_changes: mergeUniqueStrings(
+          result.value.analysis.applied_changes ?? result.value.analysis.suggested_changes ?? [],
+          [
+            `Edited ${editingComparison.value.role_heading} bullet${typeof nextResult.edit.score_delta === 'number' ? ` (${nextResult.edit.score_delta >= 0 ? '+' : ''}${nextResult.edit.score_delta})` : ''}: ${nextResult.edit.reason || nextResult.edit.instruction}`,
+          ],
+        ),
+      },
+      optimized: {
+        ...result.value.optimized,
+        ...nextResult.optimized,
+        metadata: {
+          ...currentMetadata,
+          ...nextMetadata,
+          kept_changes: [
+            ...(currentMetadata.kept_changes ?? []),
+            ...(nextMetadata.kept_changes ?? []),
+          ],
+          rejected_changes: [
+            ...(currentMetadata.rejected_changes ?? []),
+            ...(nextMetadata.rejected_changes ?? []),
+          ],
+          scores: nextMetadata.scores ?? currentMetadata.scores,
+          version_snapshot: nextMetadata.version_snapshot ?? currentMetadata.version_snapshot,
+        },
+      },
+      diff: nextResult.diff ?? result.value.diff,
+      ats_score: nextResult.ats_score ?? result.value.ats_score,
+      application_readiness: nextResult.application_readiness
+        ? {
+            ...nextResult.application_readiness,
+            projected_score: nextResult.application_readiness.projected_score ?? nextResult.application_readiness.score,
+            projected_breakdown:
+              nextResult.application_readiness.projected_breakdown ?? nextResult.application_readiness.breakdown,
+            projected_top_issues:
+              nextResult.application_readiness.projected_top_issues ?? nextResult.application_readiness.top_issues,
+          }
+        : result.value.application_readiness,
+    }
+
+    fixApplied.value = true
+    editableResumeText.value = nextResult.optimized.text ?? editableResumeText.value
+    closeBulletEdit()
+    await preparePdfPreview(true)
+  } catch (unknownError: unknown) {
+    if (axios.isAxiosError(unknownError)) {
+      editError.value = String(unknownError.response?.data?.detail ?? 'Failed to apply bullet edit.')
+    } else {
+      editError.value = 'Failed to apply bullet edit.'
+    }
+  } finally {
+    applyingEdit.value = false
+  }
+}
+
 watch(result, (nextResult) => {
   if (!nextResult) {
     return
   }
-  fixApplied.value = nextResult.analysis.mode === 'suggestions'
+  fixApplied.value = fixApplied.value || nextResult.analysis.mode === 'suggestions'
   editableResumeText.value = fixApplied.value
     ? nextResult.optimized.text ?? nextResult.parsed.text ?? ''
     : nextResult.parsed.text ?? ''
@@ -788,6 +983,11 @@ onBeforeUnmount(() => {
         :rejected-changes="optimizationRejectedChanges"
         :metric-signals="optimizationMetricSignals"
         :keyword-analysis="optimizationKeywordAnalysis"
+        :matched-skill-names="matchedSkillNames"
+        :missing-skill-names="missingSkillNames"
+        :extra-strength-names="extraStrengthNames"
+        :job-match-title="jobMatchTitle"
+        :job-match-narrative="jobMatchNarrative"
         @back="goToStep(3)"
         @run="runOptimization"
         @continue="continueToDownload"
@@ -806,6 +1006,10 @@ onBeforeUnmount(() => {
         :imported-job="importedJob"
         :preserved-role-count="preservedRoleCount"
         :changed-bullet-comparisons="changedBulletComparisons"
+        :editing-comparison="editingComparison"
+        :edit-instruction="editInstruction"
+        :edit-error="editError"
+        :applying-edit="applyingEdit"
         :preview-pdf-url="previewPdfUrl"
         :preview-preparing="previewPreparing"
         :preview-failed="previewFailed"
@@ -817,10 +1021,20 @@ onBeforeUnmount(() => {
         :rejected-changes="optimizationRejectedChanges"
         :metric-signals="optimizationMetricSignals"
         :keyword-analysis="optimizationKeywordAnalysis"
+        :matched-skill-names="matchedSkillNames"
+        :missing-skill-names="missingSkillNames"
+        :extra-strength-names="extraStrengthNames"
+        :job-match-title="jobMatchTitle"
+        :job-match-narrative="jobMatchNarrative"
+        :current-version-snapshot="currentVersionSnapshot"
         @back="goToStep(4)"
         @preview="preparePdfPreview(true)"
         @download="downloadResume"
         @regenerate="regenerateOptimization"
+        @open-edit="openBulletEdit"
+        @close-edit="closeBulletEdit"
+        @apply-edit="applyBulletEdit"
+        @update:edit-instruction="editInstruction = $event"
       />
     </div>
   </section>

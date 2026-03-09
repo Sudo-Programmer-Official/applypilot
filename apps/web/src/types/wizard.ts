@@ -93,6 +93,16 @@ export interface AnalysisResult {
   top_skills?: SkillInsight[]
   matched_skills?: SkillInsight[]
   missing_skills?: SkillInsight[]
+  keywords?: {
+    job?: string[]
+    matched?: string[]
+    missing?: string[]
+  }
+  job_alignment?: {
+    job_description_provided?: boolean
+    matched_count?: number
+    missing_count?: number
+  }
   suggested_changes?: string[]
   applied_changes?: string[]
   unresolved_suggestions?: string[]
@@ -143,9 +153,28 @@ export interface ResumeDocument {
 
 export interface ExperienceBulletComparison {
   id: string
+  entry_index: number
+  bullet_index: number
   role_heading: string
   original: string
   optimized: string
+}
+
+export interface ResumeVersionSnapshot {
+  id: number
+  parsed_resume_id: number
+  parent_version_id?: number | null
+  version_number: number
+  source: string
+  metadata?: {
+    edit_type?: string
+    target_section?: string
+    target_path?: string
+    reason?: string
+    instruction?: string
+    score_delta?: number
+  }
+  created_at?: string | null
 }
 
 export interface ResumeSectionSummary {
@@ -181,6 +210,7 @@ export interface PipelineResult {
       optimization_plan?: OptimizationDecision[]
       kept_changes?: OptimizationDecision[]
       rejected_changes?: OptimizationDecision[]
+      version_snapshot?: ResumeVersionSnapshot
       scores?: {
         original?: OptimizationScoreSnapshot
         optimized?: OptimizationScoreSnapshot

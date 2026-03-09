@@ -28,9 +28,9 @@ _NOISE_MARKERS = (
 )
 
 _SECTION_PATTERNS = {
-    "requirements": r"^(requirements|qualifications|basic qualifications|required skills|must have|what you bring)[: ]*$",
+    "requirements": r"^(requirements|qualifications|basic qualifications|required skills|technical skills|skills|must have|what you bring|education)[: ]*$",
     "preferred": r"^(preferred qualifications|nice to have|preferred skills)[: ]*$",
-    "responsibilities": r"^(responsibilities|what you will do|what you'll do|you will|in this role)[: ]*$",
+    "responsibilities": r"^(role and responsibilities|responsibilities|what you will do|what you'll do|you will|in this role)[: ]*$",
 }
 
 _PHRASE_MARKERS = (
@@ -41,6 +41,20 @@ _PHRASE_MARKERS = (
     "familiar with",
     "expertise in",
     "working with",
+)
+
+_INLINE_SECTION_HEADINGS = (
+    "Position Summary",
+    "Role and Responsibilities",
+    "About the Team",
+    "Key Focus",
+    "Responsibilities",
+    "Qualifications",
+    "Preferred Qualifications",
+    "Technical Skills",
+    "Skills",
+    "Education",
+    "Requirements",
 )
 
 _CATEGORY_SECTIONS = {
@@ -62,6 +76,7 @@ _SKILL_LIBRARY: List[Dict[str, Any]] = [
     {"name": "JavaScript", "category": "language", "patterns": [r"\bjavascript\b"]},
     {"name": "TypeScript", "category": "language", "patterns": [r"\btypescript\b"]},
     {"name": "SQL", "category": "language", "patterns": [r"\bsql\b"]},
+    {"name": "Bash", "category": "language", "patterns": [r"\bbash\b", r"\bshell scripting\b"]},
     {"name": "FastAPI", "category": "framework", "patterns": [r"\bfastapi\b"]},
     {"name": "Django", "category": "framework", "patterns": [r"\bdjango\b"]},
     {"name": "Flask", "category": "framework", "patterns": [r"\bflask\b"]},
@@ -75,6 +90,7 @@ _SKILL_LIBRARY: List[Dict[str, Any]] = [
     {"name": "Kubernetes", "category": "tool", "patterns": [r"\bkubernetes\b", r"\bk8s\b"]},
     {"name": "Terraform", "category": "tool", "patterns": [r"\bterraform\b"]},
     {"name": "PostgreSQL", "category": "database", "patterns": [r"\bpostgresql\b", r"\bpostgres\b"]},
+    {"name": "NoSQL", "category": "database", "patterns": [r"\bnosql\b"]},
     {"name": "MySQL", "category": "database", "patterns": [r"\bmysql\b"]},
     {"name": "MongoDB", "category": "database", "patterns": [r"\bmongodb\b"]},
     {"name": "Redis", "category": "database", "patterns": [r"\bredis\b"]},
@@ -86,16 +102,48 @@ _SKILL_LIBRARY: List[Dict[str, Any]] = [
     {"name": "System Design", "category": "architecture", "patterns": [r"\bsystem design\b"]},
     {"name": "CI/CD", "category": "methodology", "patterns": [r"\bci\s*/\s*cd\b", r"\bcontinuous integration\b", r"\bcontinuous delivery\b", r"\bcontinuous deployment\b"]},
     {"name": "Agile", "category": "methodology", "patterns": [r"\bagile\b", r"\bscrum\b"]},
+    {"name": "Automation", "category": "methodology", "patterns": [r"\bautomation\b", r"\bautomated\b", r"\bautomating\b"]},
+    {"name": "Unix", "category": "tool", "patterns": [r"\bunix\b", r"\blinux\b"]},
     {"name": "Data Pipelines", "category": "data", "patterns": [r"\bdata pipelines?\b", r"\betl\b"]},
+    {"name": "Data Analytics", "category": "data", "patterns": [r"\bdata analytics\b", r"\banalyze network data\b"]},
     {"name": "Airflow", "category": "data", "patterns": [r"\bairflow\b"]},
     {"name": "Spark", "category": "data", "patterns": [r"\bspark\b", r"\bapache spark\b"]},
     {"name": "Kafka", "category": "data", "patterns": [r"\bkafka\b", r"\bapache kafka\b"]},
     {"name": "Machine Learning", "category": "ml", "patterns": [r"\bmachine learning\b"]},
+    {"name": "Agentic AI", "category": "ml", "patterns": [r"\bagentic ai\b", r"\bagentic\b"]},
     {"name": "LLMs", "category": "ml", "patterns": [r"\bllms?\b", r"\blarge language models?\b"]},
+    {"name": "AI Automation", "category": "ml", "patterns": [r"\bai automation\b", r"\bai tools?\b"]},
     {"name": "MLOps", "category": "ml", "patterns": [r"\bmlops\b"]},
 ]
 
 _ROLE_TEMPLATES: List[Dict[str, Any]] = [
+    {
+        "id": "agentic_ai_engineer",
+        "label": "Software Development Internship (Agentic AI tools)",
+        "patterns": [
+            r"\bagentic ai\b",
+            r"\bai tools?\b",
+            r"\bsoftware development internship\b",
+            r"\bmachine learning\b",
+            r"\bartificial intelligence\b",
+        ],
+        "priority_skills": [
+            "Python",
+            "React",
+            "Django",
+            "FastAPI",
+            "SQL",
+            "NoSQL",
+            "Unix",
+            "Bash",
+            "Agentic AI",
+            "LLMs",
+            "Machine Learning",
+            "Automation",
+            "Data Analytics",
+            "AWS",
+        ],
+    },
     {
         "id": "backend_engineer",
         "label": "Backend Engineer",
@@ -192,6 +240,25 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", lowered).strip()
 
 
+def _normalize_inline_sections(text: str) -> str:
+    normalized = text.replace("\r", "\n")
+    for heading in _INLINE_SECTION_HEADINGS:
+        normalized = re.sub(
+            rf"(?i)\s*{re.escape(heading)}\s*:\s*",
+            f"\n{heading}:\n",
+            normalized,
+        )
+    for heading in ("Position Summary", "Role and Responsibilities"):
+        normalized = re.sub(
+            rf"(?i)\s*{re.escape(heading)}\s+",
+            f"\n{heading}\n",
+            normalized,
+        )
+    normalized = re.sub(r"(?<=[.!?])\s+(?=[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}:)", "\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
 def _is_noise_line(line: str) -> bool:
     lowered = _normalize_text(line)
     if not lowered:
@@ -216,8 +283,18 @@ def _split_sections(job_description: str) -> Dict[str, List[str]]:
     }
 
     current_section = "summary"
-    for index, raw_line in enumerate(job_description.splitlines()):
+    normalized_description = _normalize_inline_sections(job_description)
+    prepared_lines: List[str] = []
+    for raw_line in normalized_description.splitlines():
         line = raw_line.strip()
+        if not line:
+            continue
+        if len(line) > 320 and ". " in line:
+            prepared_lines.extend(part.strip() for part in re.split(r"(?<=[.!?])\s+", line) if part.strip())
+            continue
+        prepared_lines.append(line)
+
+    for index, line in enumerate(prepared_lines):
         if not line or _is_noise_line(line):
             continue
 

@@ -51,6 +51,12 @@ def analyze_resume(parsed_resume: Dict[str, Any], job_description: Optional[str]
         f"Add {skill['name']} in {', '.join(skill['suggested_sections'][:2])}."
         for skill in missing_skills[:3]
     ]
+    if job_description and not job_skills:
+        suggested_changes = [
+            "Could not extract reliable job keywords from this posting.",
+            "Paste the responsibilities or requirements section manually for a stronger ATS score.",
+            "The resume quality score still reflects your current experience and metric strength.",
+        ]
     if resume_text and not any(char.isdigit() for char in resume_text):
         suggested_changes.append("Quantify impact in your recent experience bullets.")
     if role_type["label"]:
@@ -58,6 +64,9 @@ def analyze_resume(parsed_resume: Dict[str, Any], job_description: Optional[str]
 
     return {
         "summary": (
+            "Could not extract high-signal keywords from the imported job description. Paste the requirements section manually for a reliable ATS score."
+            if job_description and not job_skills
+            else
             f"Detected {role_type['label']} role. Resume matches {len(matched_skills)} of "
             f"{len(job_skills)} high-signal skills."
             if job_skills

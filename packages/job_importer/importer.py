@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from html import unescape
 from typing import Any, Dict
@@ -23,6 +24,19 @@ _TIMEOUT_SECONDS = 6
 _MIN_DESCRIPTION_CHARS = 300
 _MAX_DESCRIPTION_CHARS = 20000
 _JOB_CACHE: Dict[str, Dict[str, Any]] = {}
+_INLINE_SECTION_HEADINGS = (
+    "Position Summary",
+    "Role and Responsibilities",
+    "About the Team",
+    "Key Focus",
+    "Responsibilities",
+    "Qualifications",
+    "Preferred Qualifications",
+    "Technical Skills",
+    "Skills",
+    "Education",
+)
+logger = logging.getLogger(__name__)
 
 
 def import_job_posting(
@@ -34,11 +48,24 @@ def import_job_posting(
 ) -> Dict[str, Any]:
     normalized_url = _normalize_url(url)
     if normalized_url in _JOB_CACHE:
-        return _JOB_CACHE[normalized_url]
+        cached_job = _hydrate_cached_job(
+            _JOB_CACHE[normalized_url],
+            cache_path=cache_path,
+            database_url=database_url,
+            cache_ttl_hours=cache_ttl_hours,
+        )
+        _JOB_CACHE[normalized_url] = cached_job
+        return cached_job
     cached = get_cached_job(normalized_url, cache_path=cache_path, database_url=database_url)
     if cached is not None:
-        _JOB_CACHE[normalized_url] = cached
-        return cached
+        hydrated = _hydrate_cached_job(
+            cached,
+            cache_path=cache_path,
+            database_url=database_url,
+            cache_ttl_hours=cache_ttl_hours,
+        )
+        _JOB_CACHE[normalized_url] = hydrated
+        return hydrated
 
     source = detect_source(normalized_url)
     html = _fetch_html(normalized_url, timeout_seconds=timeout_seconds)
@@ -85,6 +112,13 @@ def import_job_posting(
             "source": source,
         },
     }
+    logger.info(
+        "Imported job source=%s title=%s role=%s extracted_skills=%s",
+        source,
+        title,
+        intelligence.get("role_type", {}).get("id", "unknown"),
+        result["skills"][:12],
+    )
     set_cached_job(
         normalized_url,
         result,
@@ -299,8 +333,28 @@ def _sanitize_text(value: str) -> str:
 
 def _sanitize_description(value: str) -> str:
     text = BeautifulSoup(unescape(value or ""), "html.parser").get_text("\n", strip=True)
+    text = _normalize_inline_sections(text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _normalize_inline_sections(value: str) -> str:
+    normalized = value.replace("\r", "\n")
+    for heading in _INLINE_SECTION_HEADINGS:
+        normalized = re.sub(
+            rf"(?i)\s*{re.escape(heading)}\s*:\s*",
+            f"\n{heading}:\n",
+            normalized,
+        )
+    for heading in ("Position Summary", "Role and Responsibilities"):
+        normalized = re.sub(
+            rf"(?i)\s*{re.escape(heading)}\s+",
+            f"\n{heading}\n",
+            normalized,
+        )
+    normalized = re.sub(r"(?<=[.!?])\s+(?=[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}:)", "\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
 
 
 def _normalize_title(title: str) -> str:
@@ -326,3 +380,36 @@ def _fallback_company(source: str, url: str) -> str:
     if source == "workday":
         return "Workday Job Board"
     return host.split(".")[0].replace("-", " ").title()
+
+
+def _hydrate_cached_job(
+    job: Dict[str, Any],
+    cache_path: str | None = None,
+    database_url: str | None = None,
+    cache_ttl_hours: int = 168,
+) -> Dict[str, Any]:
+    description = job.get("description", "")
+    if job.get("skills") or not description:
+        return job
+
+    intelligence = analyze_job_description(description)
+    refreshed = {
+        **job,
+        "title": _normalize_title(job.get("title", "") or intelligence.get("title") or "Imported Job"),
+        "description": intelligence.get("cleaned_text", "") or description,
+        "skills": keyword_names(intelligence.get("skills", [])),
+    }
+    logger.info(
+        "Hydrated cached job url=%s role=%s extracted_skills=%s",
+        job.get("url", ""),
+        intelligence.get("role_type", {}).get("id", "unknown"),
+        refreshed["skills"][:12],
+    )
+    set_cached_job(
+        job.get("url", ""),
+        refreshed,
+        cache_path=cache_path,
+        database_url=database_url,
+        ttl_hours=cache_ttl_hours,
+    )
+    return refreshed

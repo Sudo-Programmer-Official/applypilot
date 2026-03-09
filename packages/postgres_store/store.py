@@ -72,6 +72,19 @@ CREATE TABLE IF NOT EXISTS optimized_resumes (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS resume_versions (
+    id SERIAL PRIMARY KEY,
+    parsed_resume_id INTEGER REFERENCES parsed_resumes(id) ON DELETE CASCADE,
+    parent_version_id INTEGER,
+    version_number INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    resume_text TEXT NOT NULL,
+    document_json JSONB NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(parsed_resume_id, version_number)
+);
+
 CREATE INDEX IF NOT EXISTS idx_job_cache_expires_at
 ON job_cache(expires_at);
 
@@ -89,6 +102,12 @@ ON resume_analysis(parsed_resume_id);
 
 CREATE INDEX IF NOT EXISTS idx_optimized_resumes_analysis_id
 ON optimized_resumes(analysis_id);
+
+CREATE INDEX IF NOT EXISTS idx_resume_versions_parsed_resume_id
+ON resume_versions(parsed_resume_id);
+
+CREATE INDEX IF NOT EXISTS idx_resume_versions_parent_version_id
+ON resume_versions(parent_version_id);
 """
 
 _PARSED_RESUME_FK_SQL = """
@@ -108,6 +127,23 @@ BEGIN
 END $$;
 """
 
+_RESUME_VERSION_FK_SQL = """
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_resume_versions_parent_version'
+    ) THEN
+        ALTER TABLE resume_versions
+        ADD CONSTRAINT fk_resume_versions_parent_version
+        FOREIGN KEY (parent_version_id)
+        REFERENCES resume_versions(id)
+        ON DELETE SET NULL;
+    END IF;
+END $$;
+"""
+
 
 def ensure_schema(database_url: str | None) -> None:
     if not database_url:
@@ -122,6 +158,7 @@ def ensure_schema(database_url: str | None) -> None:
                 logger.warning("Could not enable pg_trgm extension: %s", exc)
             cursor.execute(_SCHEMA_SQL)
             cursor.execute(_PARSED_RESUME_FK_SQL)
+            cursor.execute(_RESUME_VERSION_FK_SQL)
         connection.commit()
 
 
@@ -355,6 +392,71 @@ def persist_pipeline_result(
         "parsed_resume_id": parsed_resume_id or 0,
         "analysis_id": analysis_id,
         "optimized_resume_id": optimized_id,
+    }
+
+
+def persist_resume_version(
+    database_url: str | None,
+    parsed_resume_id: int | None,
+    source: str,
+    resume_text: str,
+    document: Dict[str, Any],
+    metadata: Dict[str, Any] | None = None,
+    parent_version_id: int | None = None,
+) -> Dict[str, Any] | None:
+    if not database_url or not parsed_resume_id:
+        return None
+
+    with connect(database_url, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
+                FROM resume_versions
+                WHERE parsed_resume_id = %s
+                """,
+                (parsed_resume_id,),
+            )
+            next_version_row = cursor.fetchone() or {"next_version": 1}
+            next_version = int(next_version_row.get("next_version") or 1)
+
+            cursor.execute(
+                """
+                INSERT INTO resume_versions (
+                    parsed_resume_id,
+                    parent_version_id,
+                    version_number,
+                    source,
+                    resume_text,
+                    document_json,
+                    metadata
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, parsed_resume_id, parent_version_id, version_number, source, metadata, created_at
+                """,
+                (
+                    parsed_resume_id,
+                    parent_version_id,
+                    next_version,
+                    source,
+                    resume_text,
+                    Jsonb(document),
+                    Jsonb(metadata or {}),
+                ),
+            )
+            row = cursor.fetchone()
+        connection.commit()
+
+    if row is None:
+        return None
+
+    return {
+        "id": int(row["id"]),
+        "parsed_resume_id": int(row["parsed_resume_id"]),
+        "parent_version_id": int(row["parent_version_id"]) if row.get("parent_version_id") is not None else None,
+        "version_number": int(row["version_number"]),
+        "source": row["source"],
+        "metadata": row.get("metadata") or {},
+        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
     }
 
 

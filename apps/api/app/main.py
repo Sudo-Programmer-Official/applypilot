@@ -14,15 +14,18 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from .config import settings
+from .models.edit import ResumeEditRequest
 from .models.export import ResumeDownloadRequest
 from .models.job_import import JobImportRequest, JobImportResponse
 from .orchestrator.resume_pipeline import run_resume_pipeline
 from .orchestrator.suggestion_pipeline import apply_suggestion_pipeline
+from packages.ai_engine import apply_resume_edit
 from packages.job_importer import import_job_posting
 from packages.postgres_store import (
     ensure_schema,
     get_parsed_resume_by_source_hash,
     persist_pipeline_result,
+    persist_resume_version,
     upsert_parsed_resume,
 )
 from packages.resume_formatter.builder import build_resume_document
@@ -80,6 +83,12 @@ async def import_job(request: JobImportRequest):
             cache_ttl_hours=settings.job_cache_ttl_hours,
             cache_path=settings.job_cache_path,
             timeout_seconds=settings.job_import_timeout_seconds,
+        )
+        logger.info(
+            "Job import succeeded source=%s role_title=%s extracted_skills=%s",
+            job.get("source"),
+            job.get("title"),
+            job.get("skills", [])[:12],
         )
         return JobImportResponse(**job)
     except requests.RequestException as exc:
@@ -188,6 +197,29 @@ async def analyze_resume(
         parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
         result = run_resume_pipeline(temp_path, job_description, parsed_resume=parsed_resume)
         persistence_ids = persist_pipeline_result(settings.database_url, result, job_url=job_url)
+        version_snapshot = None
+        if persistence_ids and persistence_ids.get("parsed_resume_id"):
+            score_meta = result.optimized.get("metadata", {}).get("scores", {})
+            before_total = int(round(score_meta.get("original", {}).get("total", 0)))
+            after_total = int(round(score_meta.get("optimized", {}).get("total", before_total)))
+            version_snapshot = persist_resume_version(
+                settings.database_url,
+                persistence_ids.get("parsed_resume_id"),
+                source="optimize",
+                resume_text=result.optimized.get("text", ""),
+                document=result.optimized.get("document", {}),
+                metadata={
+                    "mode": "analyze",
+                    "job_url": job_url,
+                    "edit_type": "optimize",
+                    "target_section": "resume",
+                    "target_path": "resume",
+                    "reason": "Generated an optimized draft from the uploaded resume and job context.",
+                    "score_delta": after_total - before_total,
+                },
+            )
+        if version_snapshot:
+            result.optimized.setdefault("metadata", {})["version_snapshot"] = version_snapshot
         if persistence_ids:
             logger.info(
                 "Persisted resume analysis parsed_resume_id=%s analysis_id=%s optimized_resume_id=%s",
@@ -223,6 +255,27 @@ async def apply_resume_suggestions(file: UploadFile = File(...), suggestions: st
         parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
         result = apply_suggestion_pipeline(temp_path, suggestions, parsed_resume=parsed_resume)
         persistence_ids = persist_pipeline_result(settings.database_url, result)
+        version_snapshot = None
+        if persistence_ids and persistence_ids.get("parsed_resume_id"):
+            readiness_before = int(result.application_readiness.get("score", 0))
+            readiness_after = int(result.application_readiness.get("projected_score", readiness_before))
+            version_snapshot = persist_resume_version(
+                settings.database_url,
+                persistence_ids.get("parsed_resume_id"),
+                source="suggestions",
+                resume_text=result.optimized.get("text", ""),
+                document=result.optimized.get("document", {}),
+                metadata={
+                    "mode": "suggestions",
+                    "edit_type": "suggestions",
+                    "target_section": "resume",
+                    "target_path": "resume",
+                    "reason": "Applied external suggestions to the structured resume.",
+                    "score_delta": readiness_after - readiness_before,
+                },
+            )
+        if version_snapshot:
+            result.optimized.setdefault("metadata", {})["version_snapshot"] = version_snapshot
         if persistence_ids:
             logger.info(
                 "Persisted suggestion run parsed_resume_id=%s analysis_id=%s optimized_resume_id=%s",
@@ -244,6 +297,50 @@ async def apply_resume_suggestions(file: UploadFile = File(...), suggestions: st
         raise HTTPException(status_code=500, detail="Resume suggestion flow failed.") from exc
     finally:
         Path(temp_path).unlink(missing_ok=True)
+
+
+@app.post("/resume/edit")
+async def edit_resume(payload: ResumeEditRequest):
+    try:
+        edit_result = apply_resume_edit(
+            original_document=payload.original_document,
+            current_document=payload.current_document,
+            instruction=payload.instruction,
+            target=payload.target.model_dump(),
+            job_description=payload.job_description or "",
+        )
+        version_snapshot = persist_resume_version(
+            settings.database_url,
+            payload.parsed_resume_id,
+            source="manual_edit",
+            resume_text=edit_result["optimized"]["text"],
+            document=edit_result["optimized"]["document"],
+            metadata={
+                "edit_type": "bullet_edit",
+                "target_section": payload.target.section,
+                "target_path": f"experience[{payload.target.entry_index}].bullets[{payload.target.bullet_index}]",
+                "instruction": payload.instruction.strip(),
+                "reason": edit_result["edit"].get("reason"),
+                "score_delta": edit_result["edit"].get("score_delta", 0),
+                "target": payload.target.model_dump(),
+            },
+            parent_version_id=payload.parent_version_id,
+        )
+        if version_snapshot:
+            edit_result["optimized"].setdefault("metadata", {})["version_snapshot"] = version_snapshot
+        logger.info(
+            "Resume edit applied parsed_resume_id=%s entry_index=%s bullet_index=%s",
+            payload.parsed_resume_id,
+            payload.target.entry_index,
+            payload.target.bullet_index,
+        )
+        return {"status": "ok", "result": edit_result}
+    except ValueError as exc:
+        logger.warning("Resume edit rejected: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Resume edit failed")
+        raise HTTPException(status_code=500, detail="Resume edit failed.") from exc
 
 
 @app.post("/resume/download")

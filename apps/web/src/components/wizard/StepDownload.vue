@@ -9,6 +9,7 @@ import type {
   OptimizationDecision,
   OptimizationScoreRow,
   PipelineResult,
+  ResumeVersionSnapshot,
 } from '../../types/wizard'
 
 const props = defineProps<{
@@ -22,6 +23,10 @@ const props = defineProps<{
   importedJob: ImportedJob | null
   preservedRoleCount: number
   changedBulletComparisons: ExperienceBulletComparison[]
+  editingComparison: ExperienceBulletComparison | null
+  editInstruction: string
+  editError: string
+  applyingEdit: boolean
   previewPdfUrl: string
   previewPreparing: boolean
   previewFailed: boolean
@@ -33,6 +38,12 @@ const props = defineProps<{
   rejectedChanges: OptimizationDecision[]
   metricSignals: MetricSignal[]
   keywordAnalysis: KeywordAnalysis | null
+  matchedSkillNames: string[]
+  missingSkillNames: string[]
+  extraStrengthNames: string[]
+  jobMatchTitle: string
+  jobMatchNarrative: string
+  currentVersionSnapshot: ResumeVersionSnapshot | null
 }>()
 
 const emit = defineEmits<{
@@ -40,7 +51,41 @@ const emit = defineEmits<{
   (e: 'download'): void
   (e: 'preview'): void
   (e: 'regenerate'): void
+  (e: 'open-edit', comparison: ExperienceBulletComparison, presetInstruction?: string): void
+  (e: 'close-edit'): void
+  (e: 'apply-edit'): void
+  (e: 'update:edit-instruction', value: string): void
 }>()
+
+function onEditInput(event: Event) {
+  emit('update:edit-instruction', (event.target as HTMLTextAreaElement).value)
+}
+
+function suggestionChips(comparison: ExperienceBulletComparison) {
+  const suggestions = ['Improve impact', 'Tighten wording', 'Tailor to JD']
+  const lowered = comparison.optimized.toLowerCase()
+  if (!/\d/.test(comparison.optimized)) {
+    suggestions.unshift('Add metrics')
+  }
+  if (lowered.includes('aws') || lowered.includes('lambda')) {
+    suggestions.unshift('Highlight AWS')
+  } else if (lowered.includes('api') || lowered.includes('backend')) {
+    suggestions.unshift('Highlight backend ownership')
+  }
+  return suggestions.slice(0, 4)
+}
+
+function instructionForSuggestion(label: string) {
+  const mapping: Record<string, string> = {
+    'Add metrics': 'Add measurable impact and scale without inventing new results.',
+    'Improve impact': 'Make the business impact and technical outcome more explicit.',
+    'Tighten wording': 'Rewrite this bullet to be more concise and recruiter-friendly.',
+    'Tailor to JD': 'Tailor this bullet more closely to the target job description language.',
+    'Highlight AWS': 'Mention AWS Lambda and cloud context more clearly.',
+    'Highlight backend ownership': 'Make backend ownership and API work more explicit.',
+  }
+  return mapping[label] ?? 'Rewrite this bullet to be clearer and stronger.'
+}
 </script>
 
 <template>
@@ -109,8 +154,29 @@ const emit = defineEmits<{
       </article>
     </div>
 
+    <article v-if="currentVersionSnapshot" class="version-card">
+      <div class="card-head">
+        <h4>Latest version snapshot</h4>
+        <span>v{{ currentVersionSnapshot.version_number }}</span>
+      </div>
+      <div class="version-grid">
+        <div>
+          <strong>{{ currentVersionSnapshot.metadata?.edit_type || currentVersionSnapshot.source }}</strong>
+          <p class="meta-line">
+            {{ currentVersionSnapshot.metadata?.reason || 'Saved structured resume snapshot.' }}
+          </p>
+        </div>
+        <div class="version-metric" v-if="currentVersionSnapshot.metadata?.score_delta !== undefined">
+          <span>Score delta</span>
+          <strong :data-positive="(currentVersionSnapshot.metadata?.score_delta || 0) >= 0">
+            {{ (currentVersionSnapshot.metadata?.score_delta || 0) >= 0 ? '+' : '' }}{{ currentVersionSnapshot.metadata?.score_delta }}
+          </strong>
+        </div>
+      </div>
+    </article>
+
     <OptimizationInsights
-      v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length || keywordAnalysis"
+      v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length || keywordAnalysis || matchedSkillNames.length || missingSkillNames.length || extraStrengthNames.length"
       title="Optimization results"
       subtitle="Review the score deltas, applied changes, rejected edits, and impact signals before exporting."
       :quality-before="qualityBefore"
@@ -120,6 +186,11 @@ const emit = defineEmits<{
       :rejected-changes="rejectedChanges"
       :metric-signals="metricSignals"
       :keyword-analysis="keywordAnalysis"
+      :matched-skill-names="matchedSkillNames"
+      :missing-skill-names="missingSkillNames"
+      :extra-strength-names="extraStrengthNames"
+      :job-match-title="jobMatchTitle"
+      :job-match-narrative="jobMatchNarrative"
     />
 
     <article class="preview-card">
@@ -159,7 +230,10 @@ const emit = defineEmits<{
           :key="comparison.id"
           class="comparison-item"
         >
-          <p class="comparison-heading">{{ comparison.role_heading }}</p>
+          <div class="comparison-headline">
+            <p class="comparison-heading">{{ comparison.role_heading }}</p>
+            <button class="ghost edit-trigger" type="button" @click="emit('open-edit', comparison)">Edit</button>
+          </div>
           <div class="comparison-columns">
             <div class="comparison-column">
               <span>Original</span>
@@ -169,6 +243,17 @@ const emit = defineEmits<{
               <span>Optimized</span>
               <p>{{ comparison.optimized }}</p>
             </div>
+          </div>
+          <div class="chip-row">
+            <button
+              v-for="label in suggestionChips(comparison)"
+              :key="`${comparison.id}-${label}`"
+              class="chip-button"
+              type="button"
+              @click="emit('open-edit', comparison, instructionForSuggestion(label))"
+            >
+              {{ label }}
+            </button>
           </div>
         </article>
       </div>
@@ -200,6 +285,36 @@ const emit = defineEmits<{
           </div>
         </div>
         <p v-else class="empty-copy">No line-level diff was generated for this run.</p>
+      </article>
+    </div>
+
+    <div v-if="editingComparison" class="modal-backdrop" @click.self="emit('close-edit')">
+      <article class="edit-modal">
+        <div class="card-head">
+          <h4>Edit bullet</h4>
+          <button class="ghost" type="button" :disabled="applyingEdit" @click="emit('close-edit')">Close</button>
+        </div>
+        <p class="meta-line">{{ editingComparison.role_heading }}</p>
+        <div class="comparison-column">
+          <span>Current bullet</span>
+          <p>{{ editingComparison.optimized }}</p>
+        </div>
+        <label class="edit-label" for="bullet-edit-instruction">How should this bullet change?</label>
+        <textarea
+          id="bullet-edit-instruction"
+          class="edit-textarea"
+          :value="editInstruction"
+          placeholder="Example: Make AWS Lambda and scale more explicit."
+          :disabled="applyingEdit"
+          @input="onEditInput"
+        />
+        <p v-if="editError" class="edit-error">{{ editError }}</p>
+        <div class="action-row modal-actions">
+          <button class="primary" type="button" :disabled="applyingEdit" @click="emit('apply-edit')">
+            {{ applyingEdit ? 'Applying edit...' : 'Apply edit' }}
+          </button>
+          <button class="ghost" type="button" :disabled="applyingEdit" @click="emit('close-edit')">Cancel</button>
+        </div>
       </article>
     </div>
   </section>
@@ -356,7 +471,8 @@ button:disabled {
 }
 
 .preview-card,
-.detail-card {
+.detail-card,
+.version-card {
   width: 100%;
   max-width: 980px;
   justify-self: center;
@@ -441,10 +557,21 @@ button:disabled {
   background: rgba(248, 250, 252, 0.92);
 }
 
+.comparison-headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .comparison-heading {
   margin: 0;
   color: #14213d;
   font-weight: 700;
+}
+
+.edit-trigger {
+  padding-inline: 16px;
 }
 
 .comparison-columns {
@@ -477,6 +604,52 @@ button:disabled {
 
 .optimized-column {
   background: rgba(220, 252, 231, 0.68);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chip-button {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(219, 234, 254, 0.78);
+  color: #124084;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.version-grid {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.version-metric {
+  min-width: 120px;
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.version-metric span {
+  color: #5f6c80;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.version-metric strong {
+  font-size: 1.4rem;
+  color: #14213d;
+}
+
+.version-metric strong[data-positive='true'] {
+  color: #166534;
 }
 
 .change-list {
@@ -519,6 +692,51 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+  z-index: 40;
+}
+
+.edit-modal {
+  width: min(680px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.edit-label {
+  font-weight: 700;
+  color: #14213d;
+}
+
+.edit-textarea {
+  min-height: 140px;
+  resize: vertical;
+  padding: 14px 16px;
+  border: 1px solid rgba(20, 33, 61, 0.14);
+  border-radius: 18px;
+  font: inherit;
+  color: #14213d;
+  background: #fff;
+}
+
+.edit-error {
+  margin: 0;
+  color: #b91c1c;
+}
+
+.modal-actions {
+  justify-content: flex-end;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -539,6 +757,15 @@ button:disabled {
   .detail-grid {
     grid-template-columns: 1fr;
     min-width: 0;
+  }
+
+  .version-grid {
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .version-metric {
+    justify-items: start;
   }
 
   .preview-frame {

@@ -36,6 +36,11 @@ const props = defineProps<{
   rejectedChanges: OptimizationDecision[]
   metricSignals: MetricSignal[]
   keywordAnalysis: KeywordAnalysis | null
+  matchedSkillNames: string[]
+  missingSkillNames: string[]
+  extraStrengthNames: string[]
+  jobMatchTitle: string
+  jobMatchNarrative: string
 }>()
 
 const emit = defineEmits<{
@@ -181,7 +186,7 @@ const topSkillsEmptyCopy = computed(() => {
       </article>
 
       <OptimizationInsights
-        v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length || keywordAnalysis"
+        v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length || keywordAnalysis || matchedSkillNames.length || missingSkillNames.length || extraStrengthNames.length"
         title="Explainable optimization"
         subtitle="ApplyPilot only keeps edits that improve score without reducing credibility."
         :quality-before="qualityBefore"
@@ -191,6 +196,11 @@ const topSkillsEmptyCopy = computed(() => {
         :rejected-changes="rejectedChanges"
         :metric-signals="metricSignals"
         :keyword-analysis="keywordAnalysis"
+        :matched-skill-names="matchedSkillNames"
+        :missing-skill-names="missingSkillNames"
+        :extra-strength-names="extraStrengthNames"
+        :job-match-title="jobMatchTitle"
+        :job-match-narrative="jobMatchNarrative"
       />
 
       <div class="step-actions">
