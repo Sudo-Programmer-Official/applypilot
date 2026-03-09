@@ -110,7 +110,8 @@ def _coerce_document(value: ResumeDocument | Dict[str, Any]) -> ResumeDocument:
 
 
 def _clean_inline_value(text: str) -> str:
-    cleaned = _normalize_whitespace(text)
+    cleaned = normalize_resume_line(text or "")
+    cleaned = _normalize_whitespace(cleaned)
     cleaned = _normalize_known_technologies(cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     if _is_placeholder_text(cleaned):

@@ -36,6 +36,7 @@ class ResumePolishTests(unittest.TestCase):
         document = ResumeDocument(
             skills={
                 "Cloud & Infrastructure": ["Cloud Watch", "Fast API", "Mongo DB"],
+                "Backend & Distributed Systems": ["RESTAP Is", "CI / CD"],
             }
         )
 
@@ -44,6 +45,10 @@ class ResumePolishTests(unittest.TestCase):
         self.assertEqual(
             polished.skills["Cloud & Infrastructure"],
             ["CloudWatch", "FastAPI", "MongoDB"],
+        )
+        self.assertEqual(
+            polished.skills["Backend & Distributed Systems"],
+            ["REST APIs", "CI/CD"],
         )
 
     def test_polish_repairs_truncated_project_details(self) -> None:
