@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import AtsConfidencePanel from './AtsConfidencePanel.vue'
 import OptimizationInsights from './OptimizationInsights.vue'
 import type {
   ActionMode,
+  ConfidenceSnapshot,
   ImportedJob,
   KeywordAnalysis,
   MetricSignal,
@@ -29,11 +31,14 @@ const props = defineProps<{
   projectedAts: number
   importedJob: ImportedJob | null
   fixApplied: boolean
+  applyingFixes: boolean
   qualityBefore: number
   qualityAfter: number
   scoreRows: OptimizationScoreRow[]
   keptChanges: OptimizationDecision[]
   rejectedChanges: OptimizationDecision[]
+  confidence: ConfidenceSnapshot | null
+  appliedFixes: string[]
   metricSignals: MetricSignal[]
   keywordAnalysis: KeywordAnalysis | null
   matchedSkillNames: string[]
@@ -189,6 +194,38 @@ const topSkillsHeading = computed(() => (
         </ul>
       </article>
 
+      <article v-if="mode === 'analyze'" class="analysis-card full-width">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">ATS keyword analysis</p>
+            <h4>{{ fixApplied ? 'Applied fixes' : 'Missing signals ready for auto-fix' }}</h4>
+          </div>
+          <button
+            v-if="!fixApplied"
+            class="secondary"
+            type="button"
+            :disabled="applyingFixes"
+            @click="emit('apply-fixes')"
+          >
+            {{ applyingFixes ? 'Applying Fixes...' : 'Apply Fixes' }}
+          </button>
+        </div>
+        <ul v-if="appliedFixes.length" class="issue-list">
+          <li v-for="item in appliedFixes" :key="item">{{ item }}</li>
+        </ul>
+        <ul v-else-if="missingSkillNames.length" class="issue-list">
+          <li v-for="skill in missingSkillNames.slice(0, 4)" :key="skill">Surface {{ skill }} with verified edits.</li>
+        </ul>
+        <p v-else class="empty-copy">No additional ATS keyword gaps were detected for this draft.</p>
+      </article>
+
+      <AtsConfidencePanel
+        v-if="confidence"
+        title="Resume health check"
+        subtitle="Objective checks for ATS safety, keyword alignment, and submission readiness."
+        :confidence="confidence"
+      />
+
       <OptimizationInsights
         v-if="scoreRows.length || keptChanges.length || rejectedChanges.length || metricSignals.length || keywordAnalysis || matchedSkillNames.length || missingSkillNames.length || extraStrengthNames.length"
         title="Explainable optimization"
@@ -208,14 +245,6 @@ const topSkillsHeading = computed(() => (
       />
 
       <div class="step-actions">
-        <button
-          v-if="mode === 'analyze' && !fixApplied"
-          class="secondary"
-          type="button"
-          @click="emit('apply-fixes')"
-        >
-          Apply Fixes
-        </button>
         <button class="primary" type="button" @click="emit('continue')">
           Continue to Download
         </button>

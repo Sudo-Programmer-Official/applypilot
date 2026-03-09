@@ -16,10 +16,11 @@ from starlette.background import BackgroundTask
 from .config import settings
 from .models.edit import ResumeEditRequest
 from .models.export import ResumeDownloadRequest
+from .models.fix import ResumeFixRequest
 from .models.job_import import JobImportRequest, JobImportResponse
 from .orchestrator.resume_pipeline import run_resume_pipeline
 from .orchestrator.suggestion_pipeline import apply_suggestion_pipeline
-from packages.ai_engine import apply_resume_edit
+from packages.ai_engine import apply_resume_edit, apply_resume_fixes
 from packages.ai_engine.polish import polish_resume_text
 from packages.job_importer import import_job_posting
 from packages.postgres_store import (
@@ -344,6 +345,51 @@ async def edit_resume(payload: ResumeEditRequest):
         raise HTTPException(status_code=500, detail="Resume edit failed.") from exc
 
 
+@app.post("/resume/apply_fixes")
+async def apply_resume_fix_pass(payload: ResumeFixRequest):
+    try:
+        fix_result = apply_resume_fixes(
+            original_document=payload.original_document,
+            current_document=payload.current_document,
+            job_description=payload.job_description,
+            analysis=payload.analysis,
+            missing_signals=payload.missing_signals,
+        )
+        version_snapshot = persist_resume_version(
+            settings.database_url,
+            payload.parsed_resume_id,
+            source="apply_fixes",
+            resume_text=fix_result["optimized"]["text"],
+            document=fix_result["optimized"]["document"],
+            metadata={
+                "edit_type": "apply_fixes",
+                "target_section": "resume",
+                "target_path": "resume",
+                "reason": fix_result["analysis"].get("summary"),
+                "score_delta": int(round(
+                    fix_result["optimized"].get("metadata", {}).get("scores", {}).get("optimized", {}).get("total", 0)
+                    - fix_result["optimized"].get("metadata", {}).get("scores", {}).get("original", {}).get("total", 0)
+                )),
+            },
+            parent_version_id=payload.parent_version_id,
+        )
+        if version_snapshot:
+            fix_result["optimized"].setdefault("metadata", {})["version_snapshot"] = version_snapshot
+        logger.info(
+            "Resume fixes applied parsed_resume_id=%s applied=%s rejected=%s",
+            payload.parsed_resume_id,
+            len(fix_result.get("fixes", {}).get("applied", [])),
+            len(fix_result.get("fixes", {}).get("rejected", [])),
+        )
+        return {"status": "ok", "result": fix_result}
+    except ValueError as exc:
+        logger.warning("Resume fix pass rejected: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Resume fix pass failed")
+        raise HTTPException(status_code=500, detail="Resume fix pass failed.") from exc
+
+
 @app.post("/resume/download")
 async def download_resume_pdf(payload: ResumeDownloadRequest):
     resume_text = payload.resume_text.strip()
@@ -361,7 +407,10 @@ async def download_resume_pdf(payload: ResumeDownloadRequest):
         raise HTTPException(status_code=400, detail="Resume document payload is invalid.") from exc
 
     try:
-        pdf_bytes, rendered_document, render_meta = render_resume_pdf(document)
+        pdf_bytes, rendered_document, render_meta = render_resume_pdf(
+            document,
+            layout_density=payload.layout_density,
+        )
     except RuntimeError as exc:
         logger.exception("Resume PDF export is not available")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

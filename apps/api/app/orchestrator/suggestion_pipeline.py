@@ -24,12 +24,18 @@ def apply_suggestion_pipeline(
 ) -> PipelineResult:
     logger.info("Running suggestion pipeline for path=%s", resume_path)
     parsed = parsed_resume or parse_resume(resume_path)
-    original_text = parsed.get("text", "")
+    parsed_text = parsed.get("text", "")
     original_document = (
         ResumeDocument(**parsed["document"])
         if parsed.get("document")
-        else build_resume_document(original_text)
+        else build_resume_document(parsed_text)
     )
+    original_text = resume_document_to_text(original_document)
+    parsed = {
+        **parsed,
+        "text": original_text,
+        "document": original_document.model_dump(),
+    }
 
     suggestion_result = apply_suggestions_to_document(original_document, suggestions_text)
     updated_document = suggestion_result["document"]

@@ -61,7 +61,8 @@ def _append_experience(lines: List[str], document: ResumeDocument) -> None:
             line = f"{line} {entry.date}"
         lines.append(line.strip())
         for bullet in entry.bullets:
-            lines.append(f"- {bullet}")
+            if bullet.strip():
+                lines.append(f"- {bullet}")
 
 
 def _append_projects(lines: List[str], document: ResumeDocument) -> None:
@@ -74,7 +75,8 @@ def _append_projects(lines: List[str], document: ResumeDocument) -> None:
             line = f"{line}: {entry.details}"
         lines.append(line.strip())
         for bullet in entry.bullets:
-            lines.append(f"- {bullet}")
+            if bullet.strip():
+                lines.append(f"- {bullet}")
 
 
 def _trim_trailing_blanks(lines: List[str]) -> List[str]:

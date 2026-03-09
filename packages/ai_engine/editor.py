@@ -4,11 +4,11 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Sequence
 
+from packages.ai_engine.finalize import build_output_diagnostics
 from packages.ai_engine.humanizer import humanize_bullet
 from packages.ai_engine.polish import polish_resume_text
 from packages.ai_engine.scorer import score_resume
 from packages.ai_engine.verifier import verify_change
-from packages.ats_score.scorer import calculate_ats_score
 from packages.diff_engine.diff_engine import generate_diff
 from packages.job_intelligence.extractor import (
     analyze_job_description,
@@ -16,7 +16,6 @@ from packages.job_intelligence.extractor import (
     extract_resume_skills_from_document,
     keyword_names,
 )
-from packages.readiness_score.scorer import calculate_application_readiness
 from packages.resume_formatter import resume_document_to_text
 from packages.shared_types.resume_document import ResumeDocument
 
@@ -111,26 +110,22 @@ def apply_resume_edit(
     edit_reason = _build_edit_reason(cleaned_instruction, requested_terms)
 
     original_text = resume_document_to_text(source_document)
-    unpolished_text = resume_document_to_text(candidate_document)
-    current_ats = calculate_ats_score(unpolished_text, job_description or "")
-    ats_score = {
-        **current_ats,
-        "projected_score": current_ats.get("score", 0),
-        "projected_matched_keywords": current_ats.get("matched_keywords", []),
-        "projected_missing_keywords": current_ats.get("missing_keywords", []),
-    }
-    current_readiness = calculate_application_readiness(unpolished_text, job_description or "")
-    readiness = {
-        **current_readiness,
-        "projected_score": current_readiness.get("score", 0),
-        "projected_breakdown": current_readiness.get("breakdown", {}),
-        "projected_top_issues": current_readiness.get("top_issues", []),
-    }
     polished_document, polish_meta = polish_resume_text(
         candidate_document,
         role_label=role_info.get("label"),
     )
-    updated_text = resume_document_to_text(polished_document)
+    diagnostics = build_output_diagnostics(
+        original_text=original_text,
+        final_document=polished_document,
+        job_description=job_description or "",
+        original_document=source_document,
+        job_skills=job_skills,
+        role_info=role_info,
+        original_score=original_score,
+    )
+    updated_text = diagnostics["text"]
+    final_score = diagnostics.get("scores", {}).get("optimized", updated_score)
+    score_delta = int(round(final_score["total"] - current_score["total"]))
 
     change_payload = {
         **applied_change,
@@ -140,7 +135,7 @@ def apply_resume_edit(
         "reason": edit_reason,
         "scores": {
             "before": current_score,
-            "after": updated_score,
+            "after": final_score,
         },
     }
 
@@ -155,16 +150,16 @@ def apply_resume_edit(
                 "score_delta": score_delta,
                 "kept_changes": [change_payload],
                 "rejected_changes": [],
-                "scores": {
+                "scores": diagnostics.get("scores", {
                     "original": original_score,
-                    "optimized": updated_score,
-                },
+                    "optimized": final_score,
+                }),
                 "polish": polish_meta,
             },
         },
         "diff": {"unified": generate_diff(original_text, updated_text)},
-        "ats_score": ats_score,
-        "application_readiness": readiness,
+        "ats_score": diagnostics["ats_score"],
+        "application_readiness": diagnostics["application_readiness"],
         "edit": {
             "entry_index": entry_index,
             "bullet_index": bullet_index,

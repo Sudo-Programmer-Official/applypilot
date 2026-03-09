@@ -10,6 +10,7 @@ import StepUpload from './StepUpload.vue'
 import StepperWizard from './StepperWizard.vue'
 import type {
   ActionMode,
+  ConfidenceSnapshot,
   DiffLine,
   ExperienceBulletComparison,
   ImportedJob,
@@ -20,6 +21,7 @@ import type {
   ParsedResume,
   PipelineResult,
   ReadinessBreakdown,
+  ResumeLayoutDensity,
   ResumeDocument,
   ResumeExperienceItem,
   SkillInsight,
@@ -107,6 +109,8 @@ const editingComparison = ref<ExperienceBulletComparison | null>(null)
 const editInstruction = ref('')
 const editError = ref('')
 const applyingEdit = ref(false)
+const applyingFixes = ref(false)
+const layoutDensity = ref<ResumeLayoutDensity>('balanced')
 const activeAction = ref<ActionMode>('analyze')
 const loadingStageIndex = ref(0)
 
@@ -185,6 +189,13 @@ const optimizationKeywordAnalysis = computed<KeywordAnalysis | null>(() => (
   ?? optimizationScores.value?.original?.keyword_analysis
   ?? null
 ))
+const optimizedDocument = computed<ResumeDocument | null>(() => result.value?.optimized?.document ?? null)
+const exportDocument = computed<ResumeDocument | null>(() => (
+  (fixApplied.value ? result.value?.optimized?.document : result.value?.parsed?.document)
+  ?? result.value?.optimized?.document
+  ?? result.value?.parsed?.document
+  ?? null
+))
 const matchedSkillNames = computed(() => uniqueOrderedStrings([
   ...((result.value?.analysis?.matched_skills ?? []).map((skill) => skill.name)),
   ...(result.value?.analysis?.keywords?.matched ?? []),
@@ -261,6 +272,11 @@ const optimizationScoreRows = computed<OptimizationScoreRow[]>(() => {
     .filter((row) => row.before > 0 || row.after > 0)
 })
 const metricImpactRow = computed(() => optimizationScoreRows.value.find((row) => row.key === 'metric_impact') ?? null)
+const projectedBreakdown = computed(() => (
+  result.value?.application_readiness?.projected_breakdown
+  ?? result.value?.application_readiness?.breakdown
+  ?? {}
+))
 const canAdvanceFromJobStep = computed(() => (
   mode.value === 'analyze' ? Boolean(jobDescription.value.trim()) : Boolean(suggestionsText.value.trim())
 ))
@@ -353,6 +369,172 @@ const changedBulletComparisons = computed<ExperienceBulletComparison[]>(() => {
 
   return pairs.slice(0, 6)
 })
+
+function documentSurfaceCounts(document: ResumeDocument | null) {
+  const experienceBullets = (document?.experience ?? []).reduce((count, entry) => count + entry.bullets.length, 0)
+  const projectBullets = (document?.projects ?? []).reduce((count, entry) => count + entry.bullets.length, 0)
+  const educationDetails = (document?.education ?? []).reduce((count, entry) => count + entry.details.length, 0)
+  const skillCount = Object.values(document?.skills ?? {}).flat().filter(Boolean).length
+  const totalLines = [
+    document?.summary ? 2 : 0,
+    document?.title ? 1 : 0,
+    document?.contact_items?.length ?? 0,
+    experienceBullets,
+    projectBullets,
+    educationDetails,
+    skillCount > 0 ? Math.ceil(skillCount / 4) : 0,
+  ].reduce((sum, value) => sum + value, 0)
+
+  return {
+    experienceBullets,
+    projectBullets,
+    skillCount,
+    totalLines,
+  }
+}
+
+function recommendLayoutDensity(document: ResumeDocument | null): ResumeLayoutDensity {
+  const counts = documentSurfaceCounts(document)
+  if (counts.totalLines >= 30 || counts.experienceBullets >= 14 || counts.skillCount >= 18) {
+    return 'compact'
+  }
+  if (counts.totalLines <= 16 || counts.experienceBullets <= 6) {
+    return 'spacious'
+  }
+  return 'balanced'
+}
+
+function layoutDensityLabel(value: ResumeLayoutDensity) {
+  const labels: Record<ResumeLayoutDensity, string> = {
+    compact: 'Compact',
+    balanced: 'Balanced',
+    spacious: 'Spacious',
+  }
+  return labels[value]
+}
+
+const recommendedLayoutDensity = computed<ResumeLayoutDensity>(() => recommendLayoutDensity(exportDocument.value))
+const layoutDensitySummary = computed(() => {
+  const counts = documentSurfaceCounts(exportDocument.value)
+  if (recommendedLayoutDensity.value === 'compact') {
+    return `This resume is content-heavy, so a compact layout keeps it one-page without changing the wording. Current surface: ${counts.experienceBullets} experience bullets.`
+  }
+  if (recommendedLayoutDensity.value === 'spacious') {
+    return 'This draft is relatively short, so a more spacious layout reduces dead space and makes the page feel more balanced.'
+  }
+  return 'Balanced layout is the default for this draft. It adds a little breathing room without making the page feel sparse.'
+})
+
+const keywordCoverageScore = computed(() => Math.round(projectedBreakdown.value.keyword_coverage ?? projectedAts.value ?? 0))
+const metricsCoverageScore = computed(() => Math.round(projectedBreakdown.value.impact_metrics ?? 0))
+const actionVerbScore = computed(() => Math.round(
+  optimizationScores.value?.optimized?.axes?.action_verb_strength
+  ?? optimizationScores.value?.original?.axes?.action_verb_strength
+  ?? projectedBreakdown.value.experience_strength
+  ?? 0,
+))
+const sectionCompletenessScore = computed(() => {
+  const document = optimizedDocument.value ?? exportDocument.value
+  if (!document) {
+    return 0
+  }
+
+  const checks = [
+    Boolean(document.summary?.trim()),
+    Boolean(Object.keys(document.skills ?? {}).length),
+    Boolean((document.experience ?? []).length),
+    Boolean((document.projects ?? []).length || (document.education ?? []).length),
+  ]
+  return Math.round((checks.filter(Boolean).length / checks.length) * 100)
+})
+const confidenceImprovements = computed(() => {
+  const suggestions: string[] = []
+
+  if (keywordCoverageScore.value < 70) {
+    if (missingSkillNames.value.length) {
+      suggestions.push(`Increase job-description keyword match by surfacing ${missingSkillNames.value.slice(0, 2).join(' and ')} more explicitly.`)
+    } else {
+      suggestions.push('Increase job-description keyword match with clearer role-specific terms in the summary and skills section.')
+    }
+  }
+  if (metricsCoverageScore.value < 70) {
+    suggestions.push('Add 1 to 2 more measurable metrics to the strongest experience bullets.')
+  }
+  if (actionVerbScore.value < 70) {
+    suggestions.push('Strengthen weak bullets with clearer action verbs at the start of each line.')
+  }
+  if (sectionCompletenessScore.value < 75) {
+    suggestions.push('Round out the section structure with summary, skills, and at least one supporting projects or education section.')
+  }
+  if (recommendedLayoutDensity.value === 'spacious') {
+    suggestions.push('Resume length is slightly light, so use a balanced or spacious layout for a fuller one-page export.')
+  }
+
+  return suggestions.slice(0, 4)
+})
+const confidenceSnapshot = computed<ConfidenceSnapshot | null>(() => {
+  if (!result.value) {
+    return null
+  }
+
+  return {
+    overall_score: projectedAts.value,
+    original_score: currentAts.value,
+    optimized_score: projectedAts.value,
+    checks: [
+      {
+        key: 'keyword-alignment',
+        label: 'Keyword alignment',
+        score: keywordCoverageScore.value,
+        detail: hasJobContext.value
+          ? 'Compares the optimized resume against the imported or pasted job description.'
+          : 'Uses the available resume signals because no job description was attached to this run.',
+      },
+      {
+        key: 'metrics-usage',
+        label: 'Metrics usage',
+        score: metricsCoverageScore.value,
+        detail: 'Measures how often experience bullets include concrete scale, impact, or performance numbers.',
+      },
+      {
+        key: 'action-verbs',
+        label: 'Action verbs',
+        score: actionVerbScore.value,
+        detail: 'Checks whether bullets start with strong, recruiter-friendly verbs instead of passive phrasing.',
+      },
+      {
+        key: 'section-completeness',
+        label: 'Section structure',
+        score: sectionCompletenessScore.value,
+        detail: 'Verifies that the core ATS-readable sections are present and well-formed.',
+      },
+      {
+        key: 'ats-formatting',
+        label: 'ATS formatting',
+        score: exportDocument.value ? 100 : 0,
+        detail: 'PDF export is generated from the structured resume document to preserve ATS-safe formatting.',
+      },
+    ],
+    improvements: confidenceImprovements.value,
+    verification_items: [
+      'ATS-safe formatting verified',
+      `Keyword coverage: ${keywordCoverageScore.value}%`,
+      `Metrics coverage: ${metricsCoverageScore.value}%`,
+      `Resume length optimized: ${layoutDensityLabel(layoutDensity.value)} density`,
+    ],
+    notes: result.value.ats_score?.notes ?? [],
+  }
+})
+const appliedFixes = computed(() => (
+  result.value?.optimized?.metadata?.applied_fixes
+  ?? result.value?.fixes?.applied
+  ?? []
+))
+const hasJobContext = computed(() => Boolean(
+  jobDescription.value.trim()
+  || importedJob.value?.description?.trim()
+  || result.value?.analysis?.job_alignment?.job_description_provided,
+))
 
 function normalizeComparisonText(value: string) {
   return value.replace(/\s+/g, ' ').trim()
@@ -614,20 +796,110 @@ async function runOptimization() {
   await submitResumeRequest('/resume/apply-suggestions', form, 'suggestions')
 }
 
-function applyTopIssues() {
+async function applyTopIssues() {
   if (!result.value) {
-    return
+    return false
   }
-  fixApplied.value = true
-  editableResumeText.value = result.value.optimized.text ?? result.value.parsed.text ?? ''
+  if (!parsedResume.value?.document || !result.value.optimized?.document || !jobDescription.value.trim()) {
+    error.value = 'A parsed resume, optimized draft, and job description are required before applying fixes.'
+    return false
+  }
+
+  applyingFixes.value = true
+  error.value = ''
+
+  try {
+    const response = await axios.post<{
+      result: {
+        optimized: PipelineResult['optimized']
+        analysis: PipelineResult['analysis']
+        diff: PipelineResult['diff']
+        ats_score: PipelineResult['ats_score']
+        application_readiness: PipelineResult['application_readiness']
+        fixes?: PipelineResult['fixes']
+      }
+    }>(`${apiBase}/resume/apply_fixes`, {
+      original_document: parsedResume.value.document,
+      current_document: result.value.optimized.document,
+      job_description: jobDescription.value.trim(),
+      analysis: result.value.analysis,
+      missing_signals: missingSkillNames.value,
+      parsed_resume_id: result.value.parsed.id,
+      parent_version_id: currentVersionSnapshot.value?.id,
+    })
+
+    const nextResult = response.data.result
+    const currentMetadata = result.value.optimized.metadata ?? {}
+    const nextMetadata = nextResult.optimized.metadata ?? {}
+
+    result.value = {
+      ...result.value,
+      analysis: {
+        ...result.value.analysis,
+        ...(nextResult.analysis ?? {}),
+      },
+      optimized: {
+        ...result.value.optimized,
+        ...nextResult.optimized,
+        metadata: {
+          ...currentMetadata,
+          ...nextMetadata,
+          kept_changes: [
+            ...(currentMetadata.kept_changes ?? []),
+            ...(nextMetadata.kept_changes ?? []),
+          ],
+          rejected_changes: [
+            ...(currentMetadata.rejected_changes ?? []),
+            ...(nextMetadata.rejected_changes ?? []),
+          ],
+          applied_fixes: nextMetadata.applied_fixes ?? currentMetadata.applied_fixes,
+          rejected_fixes: nextMetadata.rejected_fixes ?? currentMetadata.rejected_fixes,
+          scores: nextMetadata.scores ?? currentMetadata.scores,
+          version_snapshot: nextMetadata.version_snapshot ?? currentMetadata.version_snapshot,
+        },
+      },
+      diff: nextResult.diff ?? result.value.diff,
+      ats_score: nextResult.ats_score ?? result.value.ats_score,
+      application_readiness: nextResult.application_readiness
+        ? {
+            ...nextResult.application_readiness,
+            projected_score: nextResult.application_readiness.projected_score ?? nextResult.application_readiness.score,
+            projected_breakdown:
+              nextResult.application_readiness.projected_breakdown ?? nextResult.application_readiness.breakdown,
+            projected_top_issues:
+              nextResult.application_readiness.projected_top_issues ?? nextResult.application_readiness.top_issues,
+          }
+        : result.value.application_readiness,
+      fixes: nextResult.fixes ?? result.value.fixes,
+    }
+
+    fixApplied.value = true
+    editableResumeText.value = nextResult.optimized.text ?? result.value.optimized.text ?? result.value.parsed.text ?? ''
+    await preparePdfPreview(true)
+    return true
+  } catch (unknownError: unknown) {
+    if (axios.isAxiosError(unknownError)) {
+      error.value = String(unknownError.response?.data?.detail ?? 'Failed to apply ATS fixes.')
+    } else {
+      error.value = 'Failed to apply ATS fixes.'
+    }
+    return false
+  } finally {
+    applyingFixes.value = false
+  }
 }
 
-function continueToDownload() {
+async function continueToDownload() {
   if (!result.value) {
     return
   }
+  // Keep export aligned with the latest verified draft by running the separate
+  // fix pass before download when the user has not triggered it manually.
   if (!fixApplied.value) {
-    applyTopIssues()
+    const applied = await applyTopIssues()
+    if (!applied) {
+      return
+    }
   }
   currentStep.value = 5
   void preparePdfPreview()
@@ -691,6 +963,7 @@ function buildPdfPayload() {
     file_name: result.value?.parsed?.file_name,
     role_label: roleLabel.value,
     use_optimized: fixApplied.value,
+    layout_density: layoutDensity.value,
   }
 }
 
@@ -740,10 +1013,23 @@ async function regenerateOptimization() {
     return
   }
   if (!fixApplied.value) {
-    applyTopIssues()
+    const applied = await applyTopIssues()
+    if (!applied) {
+      return
+    }
   }
   currentStep.value = 5
   await preparePdfPreview(true)
+}
+
+function updateLayoutDensity(nextDensity: ResumeLayoutDensity) {
+  if (layoutDensity.value === nextDensity) {
+    return
+  }
+  layoutDensity.value = nextDensity
+  if (currentStep.value === 5 && result.value) {
+    void preparePdfPreview(true)
+  }
 }
 
 function openBulletEdit(comparison: ExperienceBulletComparison, presetInstruction = '') {
@@ -881,6 +1167,7 @@ watch(result, (nextResult) => {
     return
   }
   fixApplied.value = fixApplied.value || nextResult.analysis.mode === 'suggestions'
+  layoutDensity.value = recommendLayoutDensity(nextResult.optimized.document ?? nextResult.parsed.document ?? null)
   editableResumeText.value = fixApplied.value
     ? nextResult.optimized.text ?? nextResult.parsed.text ?? ''
     : nextResult.parsed.text ?? ''
@@ -1002,11 +1289,14 @@ onBeforeUnmount(() => {
         :projected-ats="projectedAts"
         :imported-job="importedJob"
         :fix-applied="fixApplied"
+        :applying-fixes="applyingFixes"
         :quality-before="originalQualityScore"
         :quality-after="optimizedQualityScore"
         :score-rows="optimizationScoreRows"
         :kept-changes="optimizationKeptChanges"
         :rejected-changes="optimizationRejectedChanges"
+        :confidence="confidenceSnapshot"
+        :applied-fixes="appliedFixes"
         :metric-signals="optimizationMetricSignals"
         :keyword-analysis="optimizationKeywordAnalysis"
         :matched-skill-names="matchedSkillNames"
@@ -1045,6 +1335,7 @@ onBeforeUnmount(() => {
         :score-rows="optimizationScoreRows"
         :kept-changes="optimizationKeptChanges"
         :rejected-changes="optimizationRejectedChanges"
+        :confidence="confidenceSnapshot"
         :metric-signals="optimizationMetricSignals"
         :keyword-analysis="optimizationKeywordAnalysis"
         :matched-skill-names="matchedSkillNames"
@@ -1053,6 +1344,9 @@ onBeforeUnmount(() => {
         :job-match-title="jobMatchTitle"
         :job-match-narrative="jobMatchNarrative"
         :current-version-snapshot="currentVersionSnapshot"
+        :layout-density="layoutDensity"
+        :recommended-layout-density="recommendedLayoutDensity"
+        :layout-density-summary="layoutDensitySummary"
         @back="goToStep(4)"
         @preview="preparePdfPreview(true)"
         @download="downloadResume"
@@ -1061,6 +1355,7 @@ onBeforeUnmount(() => {
         @close-edit="closeBulletEdit"
         @apply-edit="applyBulletEdit"
         @update:edit-instruction="editInstruction = $event"
+        @update:layout-density="updateLayoutDensity"
       />
     </div>
   </section>

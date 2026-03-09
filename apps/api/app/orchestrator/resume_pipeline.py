@@ -1,16 +1,17 @@
 """
-Orchestrates the end-to-end resume optimization flow.
+Orchestrates the main resume analyze flow.
 
-This is a lightweight placeholder that wires together the parsing, analysis,
-optimization, diffing, and ATS scoring steps. Real logic will be added in later
-phases.
+This pipeline intentionally stops after analyze -> optimize -> polish ->
+finalize/score. The verified auto-fix pass is separate and runs through
+`/resume/apply_fixes` so we do not duplicate fix logic inside the base analyze
+workflow.
 """
 import logging
 from typing import Any, Dict, Optional
 
+from packages.ai_engine.finalize import build_output_diagnostics
 from packages.ai_engine.polish import polish_resume_text
 from packages.ai_engine.optimizer import optimize_resume
-from packages.ats_score.scorer import calculate_ats_score
 from packages.diff_engine.diff_engine import generate_diff
 from packages.job_intelligence.extractor import (
     analyze_job_description,
@@ -18,7 +19,6 @@ from packages.job_intelligence.extractor import (
     extract_resume_skills_from_document,
     keyword_names,
 )
-from packages.readiness_score.scorer import calculate_application_readiness
 from packages.resume_formatter import build_resume_document, resume_document_to_text
 from packages.resume_parser.parser import parse_resume
 from packages.shared_types.pipeline_result import PipelineResult
@@ -97,7 +97,7 @@ def run_resume_pipeline(
     parsed_resume: Dict[str, Any] | None = None,
 ) -> PipelineResult:
     """
-    Execute the resume optimization pipeline and return structured results.
+    Execute the main analyze pipeline and return structured results.
 
     Args:
         resume_path: Filesystem path to the resume input.
@@ -130,37 +130,33 @@ def run_resume_pipeline(
         )
     )
 
-    current_ats = calculate_ats_score(original_text, job_description or "")
-    projected_ats = calculate_ats_score(optimized_text, job_description or "")
-    ats = {
-        **current_ats,
-        "projected_score": projected_ats.get("score", current_ats.get("score", 0)),
-        "projected_matched_keywords": projected_ats.get("matched_keywords", []),
-        "projected_missing_keywords": projected_ats.get("missing_keywords", []),
-    }
-    current_readiness = calculate_application_readiness(original_text, job_description or "")
-    projected_readiness = calculate_application_readiness(optimized_text, job_description or "")
-    readiness = {
-        **current_readiness,
-        "projected_score": projected_readiness.get("score", current_readiness.get("score", 0)),
-        "projected_breakdown": projected_readiness.get("breakdown", {}),
-        "projected_top_issues": projected_readiness.get("top_issues", []),
-    }
-
     polished_document, polish_meta = polish_resume_text(
         optimized_document,
         role_label=analysis.get("role_type", {}).get("label"),
     )
-    optimized_text = resume_document_to_text(polished_document)
+    # Recompute all diagnostics from the polished structured document so the
+    # previewed draft and exported PDF are scored from the same source of truth.
+    diagnostics = build_output_diagnostics(
+        original_text=original_text,
+        final_document=polished_document,
+        job_description=job_description or "",
+        original_document=original_document,
+        job_skills=analysis.get("top_skills", []),
+        role_info=analysis.get("role_type"),
+        original_score=optimized.get("scores", {}).get("original"),
+    )
+    optimized_text = diagnostics["text"]
     diff_text = generate_diff(original_text, optimized_text)
     optimized["optimized_document"] = polished_document.model_dump()
     optimized["optimized_text"] = optimized_text
     optimized["polish"] = polish_meta
+    if diagnostics.get("scores"):
+        optimized["scores"] = diagnostics["scores"]
 
     logger.info(
         "Resume pipeline completed chars=%s matched_keywords=%s",
         len(original_text),
-        len(ats.get("matched_keywords", [])),
+        len(diagnostics["ats_score"].get("matched_keywords", [])),
     )
 
     return PipelineResult(
@@ -172,6 +168,6 @@ def run_resume_pipeline(
             "metadata": optimized,
         },
         diff={"unified": diff_text},
-        ats_score=ats,
-        application_readiness=readiness,
+        ats_score=diagnostics["ats_score"],
+        application_readiness=diagnostics["application_readiness"],
     )

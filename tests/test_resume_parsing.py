@@ -20,7 +20,7 @@ class ResumeNormalizerTests(unittest.TestCase):
         line = (
             "DistributedSystemsEngineer|CloudDataInfrastructure&ScalablePlatforms "
             "Open AI Git Hub Linked In Tensor Flow Type Script Java Script Postgre SQL "
-            "Node js CI / CD C + + Fast API AP Is"
+            "Node js CI / CD C + + Fast API AP Is RESTAPIs Software Engineer -Accenture"
         )
 
         normalized = normalize_resume_line(line)
@@ -40,6 +40,8 @@ class ResumeNormalizerTests(unittest.TestCase):
         self.assertIn("CI/CD", normalized)
         self.assertIn("FastAPI", normalized)
         self.assertIn("APIs", normalized)
+        self.assertIn("REST APIs", normalized)
+        self.assertIn("Software Engineer - Accenture", normalized)
 
     def test_normalize_resume_text_collapses_blank_lines_only(self) -> None:
         text = "ABHISHEK JHA\n\n\nTechnicalSkills\nPython"
@@ -155,6 +157,23 @@ class ResumeBuilderTests(unittest.TestCase):
         self.assertEqual(len(document.projects), 2)
         self.assertIn("production-grade deployment", document.projects[0].details)
         self.assertIn("stateful session orchestration", document.projects[1].details)
+
+    def test_ignores_placeholder_project_bullets_and_entries(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Selected Projects",
+                "AI Productivity & Microservices Platform: Built cloud-native automation system integrating conversational workflows, calendar APIs, and stateful session orchestration.",
+                "- •",
+                "- ",
+                "•",
+            ]
+        )
+
+        document = build_resume_document(resume_text)
+
+        self.assertEqual(len(document.projects), 1)
+        self.assertEqual(document.projects[0].bullets, [])
 
 
 class ResumeParserTests(unittest.TestCase):

@@ -33,11 +33,16 @@ def polish_resume_text(
     document.contact_items = [_clean_inline_value(item) for item in document.contact_items if _clean_inline_value(item)]
     document.summary = _polish_summary(document.summary, role_label=role_label, changes=changes)
 
+    cleaned_education = []
     for entry in document.education:
         entry.school = _clean_inline_value(entry.school)
         entry.degree = _clean_inline_value(entry.degree)
         entry.date = _clean_inline_value(entry.date)
         entry.details = [_polish_sentence(detail, section="education", context=entry.school, changes=changes) for detail in entry.details]
+        entry.details = [detail for detail in entry.details if _clean_inline_value(detail)]
+        if entry.school or entry.degree or entry.date or entry.details:
+            cleaned_education.append(entry)
+    document.education = cleaned_education
 
     normalized_skills: Dict[str, list[str]] = {}
     for category, values in document.skills.items():
@@ -54,6 +59,7 @@ def polish_resume_text(
             normalized_skills[cleaned_category or "Technical Skills"] = cleaned_values[:10]
     document.skills = normalized_skills
 
+    cleaned_experience = []
     for entry in document.experience:
         entry.role = _clean_inline_value(entry.role)
         entry.company = _clean_inline_value(entry.company)
@@ -61,21 +67,34 @@ def polish_resume_text(
         entry.start_date = _clean_inline_value(entry.start_date)
         entry.end_date = _clean_inline_value(entry.end_date)
         context = " ".join(part for part in (entry.role, entry.company, role_label or "") if part).strip()
-        entry.bullets = [
-            _polish_bullet(bullet, section="experience", context=context, changes=changes)
-            for bullet in entry.bullets[:4]
-            if _clean_inline_value(bullet)
-        ]
+        polished_bullets = []
+        for bullet in entry.bullets:
+            if not _clean_inline_value(bullet):
+                continue
+            polished_bullets.append(
+                _polish_bullet(bullet, section="experience", context=context, changes=changes)
+            )
+        entry.bullets = polished_bullets[:4]
+        if entry.role or entry.company or entry.date or entry.bullets:
+            cleaned_experience.append(entry)
+    document.experience = cleaned_experience
 
+    cleaned_projects = []
     for entry in document.projects:
         entry.name = _clean_inline_value(entry.name)
         project_context = " ".join(part for part in (entry.name, role_label or "") if part).strip()
         entry.details = _polish_sentence(entry.details, section="projects", context=project_context, changes=changes)
-        entry.bullets = [
-            _polish_bullet(bullet, section="projects", context=project_context, changes=changes)
-            for bullet in entry.bullets[:3]
-            if _clean_inline_value(bullet)
-        ]
+        polished_bullets = []
+        for bullet in entry.bullets:
+            if not _clean_inline_value(bullet):
+                continue
+            polished_bullets.append(
+                _polish_bullet(bullet, section="projects", context=project_context, changes=changes)
+            )
+        entry.bullets = polished_bullets[:3]
+        if entry.name or entry.details or entry.bullets:
+            cleaned_projects.append(entry)
+    document.projects = cleaned_projects
 
     return document, {
         "applied": bool(changes),
@@ -94,6 +113,8 @@ def _clean_inline_value(text: str) -> str:
     cleaned = _normalize_whitespace(text)
     cleaned = _normalize_known_technologies(cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    if _is_placeholder_text(cleaned):
+        return ""
     return cleaned.strip()
 
 
@@ -148,6 +169,15 @@ def _normalize_whitespace(text: str) -> str:
     cleaned = re.sub(r"\s+/\s+", "/", cleaned)
     cleaned = cleaned.replace(" .", ".").replace(" ,", ",")
     return cleaned.strip()
+
+
+def _is_placeholder_text(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return True
+    if re.search(r"[A-Za-z0-9]", cleaned):
+        return False
+    return all(char in {"•", "-", "*", ".", ",", ";", ":", "/", "\\", "|", "(", ")", "[", "]", "{", "}", " "} for char in cleaned)
 
 
 def _normalize_known_technologies(text: str) -> str:

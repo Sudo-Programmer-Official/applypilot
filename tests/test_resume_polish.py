@@ -80,6 +80,44 @@ class ResumePolishTests(unittest.TestCase):
             "Built python api services using FastAPI.",
         )
 
+    def test_polish_drops_placeholder_project_bullets(self) -> None:
+        document = ResumeDocument(
+            projects=[
+                ResumeProjectItem(
+                    name="AI Productivity & Microservices Platform",
+                    details="Built cloud-native automation system integrating conversational workflows and calendar APIs.",
+                    bullets=["•", "-", ""],
+                )
+            ]
+        )
+
+        polished, _ = polish_resume_text(document)
+
+        self.assertEqual(polished.projects[0].bullets, [])
+
+    def test_polish_keeps_real_project_bullets_after_placeholder_cleanup(self) -> None:
+        document = ResumeDocument(
+            projects=[
+                ResumeProjectItem(
+                    name="AI Productivity & Agent Automation Platform",
+                    details="Built cloud-native automation system integrating conversational workflows and calendar APIs.",
+                    bullets=[
+                        "•",
+                        "-",
+                        "",
+                        "Designed microservice-based architecture supporting event-driven automation and AI-assisted task execution.",
+                    ],
+                )
+            ]
+        )
+
+        polished, _ = polish_resume_text(document)
+
+        self.assertEqual(
+            polished.projects[0].bullets,
+            ["Designed microservice-based architecture supporting event-driven automation and AI-assisted task execution."],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

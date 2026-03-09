@@ -21,7 +21,8 @@ _ENV = Environment(
     lstrip_blocks=True,
 )
 
-_COMPACT_OVERRIDES = """
+_DENSITY_OVERRIDES = {
+    "compact": """
 @page { margin: 0.42in; }
 body { font-size: 11px; line-height: 1.22; }
 .name { font-size: 24px; }
@@ -29,31 +30,66 @@ body { font-size: 11px; line-height: 1.22; }
 .section { margin-top: 12px; }
 ul { margin-top: 4px; }
 li { margin-bottom: 2px; }
-"""
+""",
+    "balanced": """
+body { line-height: 1.34; }
+.summary { margin: 13px auto 20px; }
+.section { margin-top: 18px; }
+.entry { margin-top: 8px; }
+ul { margin-top: 5px; }
+li { margin-bottom: 4px; }
+""",
+    "spacious": """
+body { line-height: 1.4; }
+.summary { margin: 14px auto 22px; }
+.section { margin-top: 20px; }
+.entry { margin-top: 9px; }
+ul { margin-top: 6px; }
+li { margin-bottom: 5px; }
+""",
+}
 
 _WEASYPRINT_NATIVE_CHECK: bool | None = None
 
 
-def render_resume_pdf(document: ResumeDocument) -> Tuple[bytes, ResumeDocument, Dict[str, int]]:
+def render_resume_pdf(
+    document: ResumeDocument,
+    *,
+    layout_density: str = "balanced",
+) -> Tuple[bytes, ResumeDocument, Dict[str, int]]:
+    density = _normalize_layout_density(layout_density)
     rendered_document = document
-    pdf_bytes, page_count, used_fallback = _render_document(rendered_document)
+    pdf_bytes, page_count, used_fallback = _render_document(rendered_document, layout_density=density)
 
     if page_count > 1:
         rendered_document = _compact_document(document)
-        pdf_bytes, page_count, used_fallback = _render_document(rendered_document, compact=True)
+        pdf_bytes, page_count, used_fallback = _render_document(
+            rendered_document,
+            layout_density="compact",
+            compact=True,
+        )
 
     return pdf_bytes, rendered_document, {"page_count": page_count, "fallback": int(used_fallback)}
 
 
-def _render_document(document: ResumeDocument, compact: bool = False) -> Tuple[bytes, int, bool]:
+def _normalize_layout_density(layout_density: str) -> str:
+    return layout_density if layout_density in _DENSITY_OVERRIDES else "balanced"
+
+
+def _render_document(
+    document: ResumeDocument,
+    *,
+    layout_density: str = "balanced",
+    compact: bool = False,
+) -> Tuple[bytes, int, bool]:
     if not _weasyprint_is_usable():
-        pdf_bytes = _render_with_reportlab(document, compact=compact)
+        pdf_bytes = _render_with_reportlab(document, layout_density=layout_density, compact=compact)
         return pdf_bytes, 1, True
 
     try:
         from weasyprint import CSS, HTML
     except Exception:
-        pdf_bytes = _render_with_reportlab(document, compact=compact)
+        pdf_bytes = _render_with_reportlab(document, layout_density=layout_density, compact=compact)
         return pdf_bytes, 1, True
 
     try:
@@ -61,15 +97,14 @@ def _render_document(document: ResumeDocument, compact: bool = False) -> Tuple[b
         html_string = template.render(resume=document)
         css_path = _TEMPLATE_DIR / "classic_resume.css"
         css_text = css_path.read_text(encoding="utf-8")
-        if compact:
-            css_text = f"{css_text}\n{_COMPACT_OVERRIDES}"
+        css_text = f"{css_text}\n{_DENSITY_OVERRIDES['compact' if compact else layout_density]}"
 
         rendered = HTML(string=html_string, base_url=str(_TEMPLATE_DIR)).render(
             stylesheets=[CSS(string=css_text)]
         )
         return rendered.write_pdf(), len(rendered.pages), False
     except Exception:
-        pdf_bytes = _render_with_reportlab(document, compact=compact)
+        pdf_bytes = _render_with_reportlab(document, layout_density=layout_density, compact=compact)
         return pdf_bytes, 1, True
 
 
@@ -97,7 +132,7 @@ def _weasyprint_is_usable() -> bool:
     return _WEASYPRINT_NATIVE_CHECK
 
 
-def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> bytes:
+def _render_with_reportlab(document: ResumeDocument, *, layout_density: str = "balanced", compact: bool = False) -> bytes:
     try:
         from reportlab.lib import colors
         from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -109,15 +144,21 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
         raise RuntimeError("PDF export requires WeasyPrint or ReportLab to be installed.") from exc
 
     styles = getSampleStyleSheet()
-    base_font = 10.4 if compact else 10.8
-    section_gap = 8 if compact else 10
+    density = "compact" if compact else _normalize_layout_density(layout_density)
+    density_profile = {
+        "compact": {"base_font": 10.4, "leading": 12, "section_gap": 8, "space_after": 2, "margins": 0.48, "top_bottom": 0.45},
+        "balanced": {"base_font": 10.8, "leading": 13.5, "section_gap": 10, "space_after": 3, "margins": 0.55, "top_bottom": 0.55},
+        "spacious": {"base_font": 10.9, "leading": 14.2, "section_gap": 12, "space_after": 4, "margins": 0.55, "top_bottom": 0.55},
+    }[density]
+    base_font = density_profile["base_font"]
+    section_gap = density_profile["section_gap"]
     body_style = ParagraphStyle(
         "ResumeBody",
         parent=styles["BodyText"],
         fontName="Helvetica",
         fontSize=base_font,
-        leading=12 if compact else 13,
-        spaceAfter=2,
+        leading=density_profile["leading"],
+        spaceAfter=density_profile["space_after"],
         alignment=TA_LEFT,
         splitLongWords=0,
         embeddedHyphenation=0,
@@ -181,10 +222,10 @@ def _render_with_reportlab(document: ResumeDocument, compact: bool = False) -> b
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        leftMargin=0.48 * inch if compact else 0.55 * inch,
-        rightMargin=0.48 * inch if compact else 0.55 * inch,
-        topMargin=0.45 * inch if compact else 0.55 * inch,
-        bottomMargin=0.45 * inch if compact else 0.55 * inch,
+        leftMargin=density_profile["margins"] * inch,
+        rightMargin=density_profile["margins"] * inch,
+        topMargin=density_profile["top_bottom"] * inch,
+        bottomMargin=density_profile["top_bottom"] * inch,
     )
 
     flow = []
@@ -285,6 +326,8 @@ def _build_entry_block(left_html, right_text, bullets, body_style, bullet_style,
 
     if bullets:
         for bullet in bullets:
+            if not str(bullet or "").strip():
+                continue
             block.append(_build_bullet_paragraph(bullet, bullet_style, paragraph_cls, width=90 if compact else 98))
 
     block.append(spacer_cls(1, 4))

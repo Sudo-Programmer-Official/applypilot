@@ -33,7 +33,7 @@
         </div>
         {% if entry.details %}
         <ul>
-          {% for detail in entry.details %}
+          {% for detail in entry.details if detail and detail.strip() %}
           <li>{{ detail }}</li>
           {% endfor %}
         </ul>
@@ -67,7 +67,7 @@
         </div>
         {% if entry.bullets %}
         <ul>
-          {% for bullet in entry.bullets %}
+          {% for bullet in entry.bullets if bullet and bullet.strip() %}
           <li>{{ bullet }}</li>
           {% endfor %}
         </ul>
@@ -87,7 +87,7 @@
         </div>
         {% if entry.bullets %}
         <ul>
-          {% for bullet in entry.bullets %}
+          {% for bullet in entry.bullets if bullet and bullet.strip() %}
           <li>{{ bullet }}</li>
           {% endfor %}
         </ul>

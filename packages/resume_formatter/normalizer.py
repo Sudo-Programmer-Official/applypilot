@@ -18,12 +18,14 @@ _CANONICAL_TOKEN_PATTERNS = (
     (re.compile(r"\bGraph\s*QL\b", re.IGNORECASE), "GraphQL"),
     (re.compile(r"\bAP\s*I\b"), "API"),
     (re.compile(r"\bAP\s*Is\b"), "APIs"),
+    (re.compile(r"\bREST\s*AP(?:\s*I)?s\b", re.IGNORECASE), "REST APIs"),
     (re.compile(r"\bNode\s*\.?\s*js\b", re.IGNORECASE), "Node.js"),
     (re.compile(r"\bNext\s*\.?\s*js\b", re.IGNORECASE), "Next.js"),
     (re.compile(r"\bVue\s*\.?\s*js\b", re.IGNORECASE), "Vue.js"),
     (re.compile(r"\bCI\s*/\s*CD\b", re.IGNORECASE), "CI/CD"),
     (re.compile(r"\bC\s*\+\s*\+\b"), "C++"),
     (re.compile(r"\bA\s*&\s*M\b", re.IGNORECASE), "A&M"),
+    (re.compile(r"\bPrompt\s*driven\b", re.IGNORECASE), "Prompt-driven"),
 )
 
 _PROTECTED_TOKEN_PATTERN = re.compile(
@@ -68,6 +70,8 @@ def normalize_resume_line(line: str) -> str:
     text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
     text = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", text)
     text = re.sub(r"(?<=[a-z])&(?=[A-Z])", " & ", text)
+    text = re.sub(r"(?<=\s)-(?=[A-Z][A-Za-z])", "- ", text)
+    text = re.sub(r"(?<=[A-Za-z])-(?=[A-Z][A-Za-z])", " - ", text)
     text = re.sub(r"(?<=[,;:])(?=[^\s])", " ", text)
     text = re.sub(r"[ \t]+", " ", text).strip()
     text = _restore_canonical_tokens(text)

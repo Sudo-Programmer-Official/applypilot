@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import AtsConfidencePanel from './AtsConfidencePanel.vue'
 import OptimizationInsights from './OptimizationInsights.vue'
 import type {
+  ConfidenceSnapshot,
   DiffLine,
   ExperienceBulletComparison,
   ImportedJob,
@@ -9,6 +11,7 @@ import type {
   OptimizationDecision,
   OptimizationScoreRow,
   PipelineResult,
+  ResumeLayoutDensity,
   ResumeVersionSnapshot,
 } from '../../types/wizard'
 
@@ -36,6 +39,7 @@ const props = defineProps<{
   scoreRows: OptimizationScoreRow[]
   keptChanges: OptimizationDecision[]
   rejectedChanges: OptimizationDecision[]
+  confidence: ConfidenceSnapshot | null
   metricSignals: MetricSignal[]
   keywordAnalysis: KeywordAnalysis | null
   matchedSkillNames: string[]
@@ -44,6 +48,9 @@ const props = defineProps<{
   jobMatchTitle: string
   jobMatchNarrative: string
   currentVersionSnapshot: ResumeVersionSnapshot | null
+  layoutDensity: ResumeLayoutDensity
+  recommendedLayoutDensity: ResumeLayoutDensity
+  layoutDensitySummary: string
 }>()
 
 const emit = defineEmits<{
@@ -55,6 +62,7 @@ const emit = defineEmits<{
   (e: 'close-edit'): void
   (e: 'apply-edit'): void
   (e: 'update:edit-instruction', value: string): void
+  (e: 'update:layout-density', value: ResumeLayoutDensity): void
 }>()
 
 function onEditInput(event: Event) {
@@ -85,6 +93,17 @@ function instructionForSuggestion(label: string) {
     'Highlight backend ownership': 'Make backend ownership and API work more explicit.',
   }
   return mapping[label] ?? 'Rewrite this bullet to be clearer and stronger.'
+}
+
+const densityOptions: Array<{ value: ResumeLayoutDensity; label: string }> = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'spacious', label: 'Spacious' },
+]
+
+function densityLabel(value: ResumeLayoutDensity) {
+  const match = densityOptions.find((option) => option.value === value)
+  return match?.label ?? value
 }
 </script>
 
@@ -153,6 +172,33 @@ function instructionForSuggestion(label: string) {
         <span>{{ previewFailed ? 'download fallback available' : 'same output as final PDF' }}</span>
       </article>
     </div>
+
+    <AtsConfidencePanel
+      v-if="confidence"
+      title="Resume health check"
+      subtitle="Final confidence signals for ATS safety, measurable impact, and keyword coverage."
+      :confidence="confidence"
+    />
+
+    <article class="layout-card">
+      <div class="card-head">
+        <h4>Resume layout</h4>
+        <span>{{ densityLabel(recommendedLayoutDensity) }} recommended</span>
+      </div>
+      <p class="meta-line">{{ layoutDensitySummary }}</p>
+      <div class="density-toggle" role="radiogroup" aria-label="Resume layout density">
+        <button
+          v-for="option in densityOptions"
+          :key="option.value"
+          class="density-button"
+          type="button"
+          :data-active="layoutDensity === option.value"
+          @click="emit('update:layout-density', option.value)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+    </article>
 
     <article v-if="currentVersionSnapshot" class="version-card">
       <div class="card-head">
@@ -441,6 +487,16 @@ h3 {
   line-height: 1.4;
 }
 
+.layout-card {
+  width: 100%;
+  max-width: 980px;
+  justify-self: center;
+  padding: 22px;
+  border: 1px solid rgba(20, 33, 61, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
 button {
   border: none;
   border-radius: 999px;
@@ -468,6 +524,23 @@ button:disabled {
 .ghost {
   color: #14213d;
   background: rgba(20, 33, 61, 0.08);
+}
+
+.density-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.density-button {
+  background: rgba(20, 33, 61, 0.06);
+  color: #14213d;
+}
+
+.density-button[data-active='true'] {
+  color: #fff;
+  background: linear-gradient(135deg, #14213d, #2563eb);
 }
 
 .preview-card,

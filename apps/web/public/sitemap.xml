@@ -7,21 +7,57 @@
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://tryapplypilot.com/dashboard</loc>
+    <loc>https://tryapplypilot.com/ats-resume-checker</loc>
     <lastmod>2026-03-09</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://tryapplypilot.com/dashboard/wizard</loc>
+    <loc>https://tryapplypilot.com/resume-optimizer</loc>
     <lastmod>2026-03-09</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://tryapplypilot.com/dashboard/history</loc>
+    <loc>https://tryapplypilot.com/ai-resume-builder</loc>
     <lastmod>2026-03-09</lastmod>
     <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://tryapplypilot.com/blog</loc>
+    <lastmod>2026-03-09</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://tryapplypilot.com/blog/how-to-pass-ats-resume-screening-2026</loc>
+    <lastmod>2026-03-09</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://tryapplypilot.com/blog/best-resume-format-for-software-engineers</loc>
+    <lastmod>2026-03-09</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://tryapplypilot.com/blog/how-recruiters-read-resumes</loc>
+    <lastmod>2026-03-09</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://tryapplypilot.com/blog/how-to-optimize-your-resume-for-google</loc>
+    <lastmod>2026-03-09</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://tryapplypilot.com/blog/resume-tips-for-ai-engineer-roles</loc>
+    <lastmod>2026-03-09</lastmod>
+    <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>

@@ -86,6 +86,23 @@ export interface OptimizationScoreRow {
   after: number
 }
 
+export interface ConfidenceCheck {
+  key: string
+  label: string
+  score: number
+  detail: string
+}
+
+export interface ConfidenceSnapshot {
+  overall_score: number
+  original_score: number
+  optimized_score: number
+  checks: ConfidenceCheck[]
+  improvements: string[]
+  verification_items: string[]
+  notes: string[]
+}
+
 export interface AnalysisResult {
   mode?: 'analysis' | 'suggestions'
   summary?: string
@@ -210,6 +227,8 @@ export interface PipelineResult {
       optimization_plan?: OptimizationDecision[]
       kept_changes?: OptimizationDecision[]
       rejected_changes?: OptimizationDecision[]
+      applied_fixes?: string[]
+      rejected_fixes?: string[]
       version_snapshot?: ResumeVersionSnapshot
       scores?: {
         original?: OptimizationScoreSnapshot
@@ -224,6 +243,10 @@ export interface PipelineResult {
     notes?: string[]
   }
   application_readiness: ReadinessResult
+  fixes?: {
+    applied?: string[]
+    rejected?: string[]
+  }
 }
 
 export interface DiffLine {
@@ -242,6 +265,7 @@ export interface ImportedJob {
 }
 
 export type ActionMode = 'analyze' | 'suggestions'
+export type ResumeLayoutDensity = 'compact' | 'balanced' | 'spacious'
 
 export interface WizardStep {
   id: number

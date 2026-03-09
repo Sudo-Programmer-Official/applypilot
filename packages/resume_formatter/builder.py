@@ -89,6 +89,10 @@ _DATE_PATTERN = re.compile(
 )
 
 
+def _has_substantive_text(value: str) -> bool:
+    return bool(re.search(r"[A-Za-z0-9]", value or ""))
+
+
 def build_resume_document(
     resume_text: str,
     role_label: str | None = None,
@@ -389,6 +393,8 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
         cleaned_line = _clean_text(line)
         bullet = _strip_bullet(line)
         if bullet:
+            if not _has_substantive_text(bullet):
+                continue
             if current is None:
                 current = ResumeExperienceItem(role="Experience", company="", date="", start_date="", end_date="", bullets=[])
                 entries.append(current)
@@ -428,6 +434,8 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
             continue
 
         if current is None:
+            if not _has_substantive_text(cleaned_line):
+                continue
             current = ResumeExperienceItem(role=cleaned_line, company="", date="", start_date="", end_date="", bullets=[])
             entries.append(current)
             continue
@@ -437,7 +445,11 @@ def _parse_experience(lines: List[str]) -> List[ResumeExperienceItem]:
         else:
             current.company = cleaned_line
 
-    return [entry for entry in entries if entry.role or entry.company or entry.bullets]
+    return [
+        entry
+        for entry in entries
+        if _has_substantive_text(entry.role) or _has_substantive_text(entry.company) or any(_has_substantive_text(bullet) for bullet in entry.bullets)
+    ]
 
 
 def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
@@ -448,6 +460,8 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
         cleaned_line = _clean_text(line)
         bullet = _strip_bullet(line)
         if bullet:
+            if not _has_substantive_text(bullet):
+                continue
             if current is None:
                 current = ResumeProjectItem(name="Project", details="", bullets=[])
                 entries.append(current)
@@ -465,6 +479,8 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
 
         if ":" in cleaned_line:
             name, details = _split_once(cleaned_line, ":")
+            if not _has_substantive_text(name) and not _has_substantive_text(details):
+                continue
             current = ResumeProjectItem(
                 name=name or "Project",
                 details=_clean_text(details),
@@ -473,10 +489,16 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
             entries.append(current)
             continue
 
+        if not _has_substantive_text(cleaned_line):
+            continue
         current = ResumeProjectItem(name=cleaned_line, details="", bullets=[])
         entries.append(current)
 
-    return entries[:3]
+    return [
+        entry
+        for entry in entries[:3]
+        if _has_substantive_text(entry.name) or _has_substantive_text(entry.details) or any(_has_substantive_text(bullet) for bullet in entry.bullets)
+    ]
 
 
 def _should_merge_project_detail_continuation(line: str) -> bool:
