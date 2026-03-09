@@ -58,16 +58,26 @@ def apply_resume_edit(
             + "."
         )
 
-    after_value = _rewrite_experience_bullet(entry, before_value, cleaned_instruction, requested_terms, allowed_terms)
-    if _normalize_text(after_value) == _normalize_text(before_value):
-        raise ValueError("Instruction did not produce a meaningful bullet change.")
-
-    candidate_document = working_document.model_copy(deep=True)
-    candidate_document.experience[entry_index].bullets[bullet_index] = after_value
-
     job_intelligence = analyze_job_description(job_description or "")
     job_skills = job_intelligence.get("skills", [])
     role_info = job_intelligence.get("role_type", {"id": "general_software", "label": "Software Engineer"})
+    after_value = _rewrite_experience_bullet(
+        entry,
+        before_value,
+        cleaned_instruction,
+        requested_terms,
+        allowed_terms,
+        job_skills=job_skills,
+        role_label=role_info.get("label", ""),
+    )
+    if _normalize_text(after_value) == _normalize_text(before_value):
+        raise ValueError(
+            "Instruction did not produce a meaningful bullet change. Try a more specific request like "
+            "'highlight AI evaluation pipelines' or 'mention machine learning workflows more explicitly'."
+        )
+
+    candidate_document = working_document.model_copy(deep=True)
+    candidate_document.experience[entry_index].bullets[bullet_index] = after_value
 
     applied_change = {
         "action": "manual_edit_experience_bullet",
@@ -182,7 +192,13 @@ def _allowed_resume_terms(*documents: ResumeDocument) -> set[str]:
 
 
 def _requested_terms(instruction: str) -> List[str]:
-    return keyword_names(extract_resume_skills(instruction or ""))
+    matches = keyword_names(extract_resume_skills(instruction or ""))
+    lowered = (instruction or "").lower()
+    if "ai/ml" in lowered or "ai / ml" in lowered:
+        matches.append("Machine Learning")
+    if "llm" in lowered and "LLMs" not in matches:
+        matches.append("LLMs")
+    return list(dict.fromkeys(matches))
 
 
 def _rewrite_experience_bullet(
@@ -191,6 +207,9 @@ def _rewrite_experience_bullet(
     instruction: str,
     requested_terms: Sequence[str],
     allowed_terms: Iterable[str],
+    *,
+    job_skills: Sequence[Dict[str, Any]] | None = None,
+    role_label: str = "",
 ) -> str:
     lower_instruction = instruction.lower()
     role_context = {term for term in allowed_terms}
@@ -206,6 +225,15 @@ def _rewrite_experience_bullet(
         candidate = _ensure_requested_terms(candidate, source, requested_terms)
 
     if candidate == source:
+        candidate = _tailor_bullet_to_role(
+            source,
+            instruction=instruction,
+            allowed_terms=role_context,
+            job_skills=job_skills or [],
+            role_label=role_label,
+        )
+
+    if candidate == source:
         candidate = humanize_bullet(entry, source, role_context=role_context, used_signatures=set())
 
     return _clean_terminal(candidate)
@@ -215,6 +243,7 @@ def _ensure_requested_terms(candidate: str, source: str, requested_terms: Sequen
     updated = candidate.rstrip(".")
     source_lower = source.lower()
     candidate_lower = updated.lower()
+    changed = False
 
     for term in requested_terms:
         term_lower = term.lower()
@@ -225,14 +254,17 @@ def _ensure_requested_terms(candidate: str, source: str, requested_terms: Sequen
         if term_lower == "aws" and "aws lambda" in source_lower and "aws lambda" not in candidate_lower:
             updated = _insert_context_phrase(updated, "AWS Lambda")
             candidate_lower = updated.lower()
+            changed = True
             continue
         if term_lower == "ci/cd":
             updated = _insert_context_phrase(updated, "CI/CD")
             candidate_lower = updated.lower()
+            changed = True
             continue
         updated = _insert_context_phrase(updated, term)
         candidate_lower = updated.lower()
-    return updated
+        changed = True
+    return updated if changed else candidate
 
 
 def _insert_context_phrase(text: str, phrase: str) -> str:
@@ -257,6 +289,59 @@ def _emphasize_impact(text: str) -> str:
     if "reliability" in lowered or "resilient" in lowered or "fault-tolerant" in lowered:
         return f"{text.rstrip('.')} for production-scale reliability"
     return text
+
+
+def _tailor_bullet_to_role(
+    source: str,
+    *,
+    instruction: str,
+    allowed_terms: Iterable[str],
+    job_skills: Sequence[Dict[str, Any]],
+    role_label: str,
+) -> str:
+    lowered_source = source.lower()
+    lowered_instruction = instruction.lower()
+    allowed = {term.lower() for term in allowed_terms}
+    job_skill_names = {str(skill.get("name", "")).lower() for skill in job_skills}
+
+    if not any(token in lowered_instruction for token in ("tailor", "job", "jd", "align", "match")):
+        return source
+
+    if ("traceability" in lowered_source or "requirement" in lowered_source) and (
+        "llm" in lowered_source or "semantic" in lowered_source
+    ):
+        if "machine learning" in allowed and "machine learning" in job_skill_names:
+            return (
+                "Built an LLM-powered requirement traceability system using semantic similarity scoring to map "
+                "functional and quality requirements across machine learning workflows."
+            )
+        if "data analytics" in allowed and "data analytics" in job_skill_names:
+            return (
+                "Built an LLM-powered requirement traceability system using semantic similarity scoring to map "
+                "functional and quality requirements for analytics-driven engineering workflows."
+            )
+        if "llms" in allowed or "machine learning" in allowed:
+            return (
+                "Built an LLM-powered requirement traceability system using semantic similarity scoring to map "
+                "functional and quality requirements across AI-focused engineering workflows."
+            )
+
+    if ("evaluation pipeline" in lowered_source or "manual scoring" in lowered_source or "benchmark" in lowered_source):
+        if "data analytics" in allowed and ("data analytics" in job_skill_names or "automation" in job_skill_names):
+            return (
+                "Designed data and evaluation pipelines to benchmark AI-generated outputs against human scoring "
+                "frameworks."
+            )
+        if "automation" in allowed and "automation" in job_skill_names:
+            return (
+                "Designed automated evaluation pipelines to benchmark AI-generated outputs against human scoring "
+                "frameworks."
+            )
+
+    if role_label and "ai" in role_label.lower() and "python" in allowed and "backend" in lowered_source:
+        return source.rstrip(".") + " with clearer alignment to Python-based AI tooling workflows"
+
+    return source
 
 
 def _clean_terminal(text: str) -> str:

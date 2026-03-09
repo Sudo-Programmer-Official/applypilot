@@ -58,6 +58,38 @@ class ResumeEditorTests(unittest.TestCase):
                 job_description="Backend Engineer\nRequirements:\n- AWS\n- Kubernetes",
             )
 
+    def test_apply_resume_edit_tailors_ai_bullet_from_jd_language(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Software Engineer",
+                "Technical Skills",
+                "Languages: Python, Java",
+                "AI & Machine Learning: Machine Learning",
+                "Experience",
+                "Graduate Assistant - Computer Science, TAMU-CC Jan 2025 - May 2025",
+                "- Built an LLM-powered requirement traceability system using semantic similarity scoring to map functional and quality requirements.",
+            ]
+        )
+        document = build_resume_document(resume_text)
+
+        result = apply_resume_edit(
+            original_document=document,
+            current_document=document,
+            instruction="Tailor this bullet to better match the AI/ML language used in the job description.",
+            target={"section": "experience", "entry_index": 0, "bullet_index": 0},
+            job_description="Software Development Internship – Agentic AI tools\nRequirements:\n- Machine Learning\n- Automation\n- Python",
+        )
+
+        updated_document = ResumeDocument.model_validate(result["optimized"]["document"])
+        updated_bullet = updated_document.experience[0].bullets[0]
+
+        self.assertIn("machine learning workflows", updated_bullet.lower())
+        self.assertNotEqual(
+            updated_bullet,
+            "Built an LLM-powered requirement traceability system using semantic similarity scoring to map functional and quality requirements.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
