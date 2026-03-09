@@ -8,6 +8,7 @@ phases.
 import logging
 from typing import Any, Dict, Optional
 
+from packages.ai_engine.polish import polish_resume_text
 from packages.ai_engine.optimizer import optimize_resume
 from packages.ats_score.scorer import calculate_ats_score
 from packages.diff_engine.diff_engine import generate_diff
@@ -129,7 +130,6 @@ def run_resume_pipeline(
         )
     )
 
-    diff_text = generate_diff(original_text, optimized_text)
     current_ats = calculate_ats_score(original_text, job_description or "")
     projected_ats = calculate_ats_score(optimized_text, job_description or "")
     ats = {
@@ -147,6 +147,16 @@ def run_resume_pipeline(
         "projected_top_issues": projected_readiness.get("top_issues", []),
     }
 
+    polished_document, polish_meta = polish_resume_text(
+        optimized_document,
+        role_label=analysis.get("role_type", {}).get("label"),
+    )
+    optimized_text = resume_document_to_text(polished_document)
+    diff_text = generate_diff(original_text, optimized_text)
+    optimized["optimized_document"] = polished_document.model_dump()
+    optimized["optimized_text"] = optimized_text
+    optimized["polish"] = polish_meta
+
     logger.info(
         "Resume pipeline completed chars=%s matched_keywords=%s",
         len(original_text),
@@ -158,7 +168,7 @@ def run_resume_pipeline(
         analysis=analysis,
         optimized={
             "text": optimized_text,
-            "document": optimized_document.model_dump(),
+            "document": polished_document.model_dump(),
             "metadata": optimized,
         },
         diff={"unified": diff_text},

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
+from packages.ai_engine.polish import polish_resume_text
 from packages.diff_engine.diff_engine import generate_diff
 from packages.job_intelligence.extractor import extract_resume_skills, extract_resume_skills_from_document
 from packages.readiness_score.scorer import calculate_application_readiness
@@ -32,17 +33,18 @@ def apply_suggestion_pipeline(
 
     suggestion_result = apply_suggestions_to_document(original_document, suggestions_text)
     updated_document = suggestion_result["document"]
-    updated_text = resume_document_to_text(updated_document)
+    polished_document, polish_meta = polish_resume_text(updated_document, role_label=role_label_from_document(updated_document))
+    updated_text = resume_document_to_text(polished_document)
 
     current_readiness = calculate_application_readiness(original_text, "")
     projected_readiness = calculate_application_readiness(updated_text, "")
-    updated_resume_skills = extract_resume_skills_from_document(updated_document.model_dump()) or extract_resume_skills(updated_text)
+    updated_resume_skills = extract_resume_skills_from_document(polished_document.model_dump()) or extract_resume_skills(updated_text)
     top_skills = updated_resume_skills[:8]
     requested_skills = suggestion_result.get("requested_skills", [])
     remaining_skills = suggestion_result.get("remaining_skills", [])
     updated_skill_names = {skill["name"] for skill in updated_resume_skills}
     matched_requested = [skill for skill in requested_skills if skill["name"] in updated_skill_names]
-    role_label = updated_document.title.split("|", 1)[0].strip() if updated_document.title else "Software Engineer"
+    role_label = role_label_from_document(polished_document)
 
     summary = _build_summary(suggestion_result.get("applied_changes", []), suggestion_result.get("unresolved_suggestions", []))
 
@@ -76,10 +78,11 @@ def apply_suggestion_pipeline(
         },
         optimized={
             "text": updated_text,
-            "document": updated_document.model_dump(),
+            "document": polished_document.model_dump(),
             "metadata": {
                 "source": "external_suggestions",
                 "suggestions": suggestion_result.get("applied_changes", []),
+                "polish": polish_meta,
             },
         },
         diff={"unified": generate_diff(original_text, updated_text)},
@@ -96,3 +99,7 @@ def _build_summary(applied_changes: List[str], unresolved_suggestions: List[str]
     if unresolved_count == 0:
         return f"Applied {applied_count} requested changes and preserved the ATS-safe resume layout."
     return f"Applied {applied_count} requested changes and left {unresolved_count} suggestion(s) for manual review."
+
+
+def role_label_from_document(document: ResumeDocument) -> str:
+    return document.title.split("|", 1)[0].strip() if document.title else "Software Engineer"

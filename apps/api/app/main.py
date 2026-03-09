@@ -20,6 +20,7 @@ from .models.job_import import JobImportRequest, JobImportResponse
 from .orchestrator.resume_pipeline import run_resume_pipeline
 from .orchestrator.suggestion_pipeline import apply_suggestion_pipeline
 from packages.ai_engine import apply_resume_edit
+from packages.ai_engine.polish import polish_resume_text
 from packages.job_importer import import_job_posting
 from packages.postgres_store import (
     ensure_schema,
@@ -354,6 +355,7 @@ async def download_resume_pdf(payload: ResumeDownloadRequest):
             document = ResumeDocument.model_validate(payload.document)
         else:
             document = build_resume_document(resume_text, role_label=payload.role_label)
+        document, polish_meta = polish_resume_text(document, role_label=payload.role_label)
     except Exception as exc:
         logger.warning("Resume export payload could not be normalized: %s", exc)
         raise HTTPException(status_code=400, detail="Resume document payload is invalid.") from exc
@@ -372,10 +374,11 @@ async def download_resume_pdf(payload: ResumeDownloadRequest):
         temp_path = tmp.name
 
     logger.info(
-        "Generated resume PDF file=%s pages=%s name=%s",
+        "Generated resume PDF file=%s pages=%s name=%s polished=%s",
         payload.file_name,
         render_meta.get("page_count", 0),
         rendered_document.name,
+        polish_meta.get("applied", False),
     )
 
     return FileResponse(

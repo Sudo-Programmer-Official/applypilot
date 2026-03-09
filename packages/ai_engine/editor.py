@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, Iterable, List, Sequence
 
 from packages.ai_engine.humanizer import humanize_bullet
+from packages.ai_engine.polish import polish_resume_text
 from packages.ai_engine.scorer import score_resume
 from packages.ai_engine.verifier import verify_change
 from packages.ats_score.scorer import calculate_ats_score
@@ -100,21 +101,26 @@ def apply_resume_edit(
     edit_reason = _build_edit_reason(cleaned_instruction, requested_terms)
 
     original_text = resume_document_to_text(source_document)
-    updated_text = resume_document_to_text(candidate_document)
-    current_ats = calculate_ats_score(updated_text, job_description or "")
+    unpolished_text = resume_document_to_text(candidate_document)
+    current_ats = calculate_ats_score(unpolished_text, job_description or "")
     ats_score = {
         **current_ats,
         "projected_score": current_ats.get("score", 0),
         "projected_matched_keywords": current_ats.get("matched_keywords", []),
         "projected_missing_keywords": current_ats.get("missing_keywords", []),
     }
-    current_readiness = calculate_application_readiness(updated_text, job_description or "")
+    current_readiness = calculate_application_readiness(unpolished_text, job_description or "")
     readiness = {
         **current_readiness,
         "projected_score": current_readiness.get("score", 0),
         "projected_breakdown": current_readiness.get("breakdown", {}),
         "projected_top_issues": current_readiness.get("top_issues", []),
     }
+    polished_document, polish_meta = polish_resume_text(
+        candidate_document,
+        role_label=role_info.get("label"),
+    )
+    updated_text = resume_document_to_text(polished_document)
 
     change_payload = {
         **applied_change,
@@ -131,7 +137,7 @@ def apply_resume_edit(
     return {
         "optimized": {
             "text": updated_text,
-            "document": candidate_document.model_dump(),
+            "document": polished_document.model_dump(),
             "metadata": {
                 "source": "manual_edit",
                 "edit_instruction": cleaned_instruction,
@@ -143,6 +149,7 @@ def apply_resume_edit(
                     "original": original_score,
                     "optimized": updated_score,
                 },
+                "polish": polish_meta,
             },
         },
         "diff": {"unified": generate_diff(original_text, updated_text)},

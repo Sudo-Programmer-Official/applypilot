@@ -459,6 +459,10 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
             current.bullets[-1] = _merge_wrapped_text(current.bullets[-1], cleaned_line)
             continue
 
+        if current and current.details and _should_merge_project_detail_continuation(cleaned_line):
+            current.details = _merge_wrapped_text(current.details, cleaned_line)
+            continue
+
         if ":" in cleaned_line:
             name, details = _split_once(cleaned_line, ":")
             current = ResumeProjectItem(
@@ -473,6 +477,16 @@ def _parse_projects(lines: List[str]) -> List[ResumeProjectItem]:
         entries.append(current)
 
     return entries[:3]
+
+
+def _should_merge_project_detail_continuation(line: str) -> bool:
+    if not line:
+        return False
+    if _section_key(line):
+        return False
+    if ":" in line:
+        return False
+    return _should_merge_bullet_continuation(line)
 
 
 def _parse_role_company_date(line: str) -> Tuple[str, str, str, str, str]:

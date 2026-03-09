@@ -138,6 +138,24 @@ class ResumeBuilderTests(unittest.TestCase):
         self.assertIn("30-40 concurrent workers", document.experience[0].bullets[0])
         self.assertIn("execution under heavy parallel workloads", document.experience[0].bullets[1])
 
+    def test_merges_wrapped_project_details(self) -> None:
+        resume_text = "\n".join(
+            [
+                "ABHISHEK JHA",
+                "Selected Projects",
+                "Software Factory Platform (Capstone): Architected a modular, service-oriented platform with API-driven workflows and",
+                "scalable backend components for production-grade deployment.",
+                "AI Productivity & Microservices Platform: Built cloud-native automation system integrating conversational workflows,",
+                "calendar APIs, and stateful session orchestration.",
+            ]
+        )
+
+        document = build_resume_document(resume_text)
+
+        self.assertEqual(len(document.projects), 2)
+        self.assertIn("production-grade deployment", document.projects[0].details)
+        self.assertIn("stateful session orchestration", document.projects[1].details)
+
 
 class ResumeParserTests(unittest.TestCase):
     def test_parse_docx_fixture_preserves_structure(self) -> None:
