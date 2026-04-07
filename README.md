@@ -28,6 +28,8 @@ npm run dev
 Backend variables live in `apps/api/.env.example`.
 Frontend variables live in `apps/web/.env.example`.
 Production frontend base URL should be `https://api.tryapplypilot.com`.
+Firebase-backed resume and portfolio storage requires the frontend `VITE_FIREBASE_*` variables plus backend
+`FIREBASE_PROJECT_ID` and `FIREBASE_SERVICE_ACCOUNT_JSON`.
 
 ## Deploy
 
@@ -45,6 +47,7 @@ Vercel:
 - Output directory: `dist`
 - SPA rewrites are configured in `apps/web/vercel.json` so deep links like `/dashboard/wizard` load on refresh.
 - Set `VITE_API_BASE` to `https://api.tryapplypilot.com`.
+- Set `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID`.
 - Connect `tryapplypilot.com` and `www.tryapplypilot.com`.
 
 ## CI

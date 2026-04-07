@@ -8,7 +8,12 @@ import StepOptimize from './StepOptimize.vue'
 import StepReview from './StepReview.vue'
 import StepUpload from './StepUpload.vue'
 import StepperWizard from './StepperWizard.vue'
-import { getOptionalAuthHeaders } from '../../lib/firebaseAuth'
+import {
+  authState,
+  getRequiredAuthHeaders,
+  signInWithGoogle,
+  waitForAuthReady,
+} from '../../lib/firebaseAuth'
 import type {
   ActionMode,
   ConfidenceSnapshot,
@@ -70,6 +75,7 @@ const optimizationAxisLabels: Record<keyof OptimizationScoreAxes, string> = {
 }
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const workspaceSignInMessage = 'Sign in with Google to keep your resume history and portfolio in one workspace.'
 const analyzeLoadingStages = [
   'Parsing resume',
   'Cleaning job description',
@@ -121,6 +127,10 @@ const uploadedFileName = computed(() => fileInput.value?.name ?? '')
 const uploadedFileSize = computed(() => fileInput.value?.size ?? 0)
 const loadingStages = computed(() => (activeAction.value === 'suggestions' ? suggestionLoadingStages : analyzeLoadingStages))
 const currentLoadingStage = computed(() => loadingStages.value[loadingStageIndex.value] ?? loadingStages.value[0] ?? '')
+const authPending = computed(() => authState.enabled && !authState.ready)
+const signedInUser = computed(() => authState.user)
+const authGateVisible = computed(() => authState.enabled && authState.ready && !signedInUser.value)
+const accountLabel = computed(() => signedInUser.value?.displayName || signedInUser.value?.email || 'Connected account')
 const analysisMode = computed(() => result.value?.analysis?.mode ?? mode.value)
 const isSuggestionMode = computed(() => analysisMode.value === 'suggestions')
 const importedTopSkills = computed<SkillInsight[]>(() => (
@@ -666,8 +676,44 @@ function selectFile(file: File | null) {
   currentStep.value = 1
 }
 
+async function ensureWorkspaceAccess() {
+  await waitForAuthReady()
+  if (authState.enabled && !authState.user) {
+    error.value = workspaceSignInMessage
+    return false
+  }
+  return true
+}
+
+async function getWorkspaceHeaders() {
+  if (!await ensureWorkspaceAccess()) {
+    throw new Error(workspaceSignInMessage)
+  }
+  if (!authState.enabled) {
+    return {}
+  }
+  return getRequiredAuthHeaders()
+}
+
+async function handleWorkspaceSignIn() {
+  error.value = ''
+  try {
+    await signInWithGoogle()
+  } catch (unknownError) {
+    if (unknownError instanceof Error) {
+      error.value = unknownError.message
+      return
+    }
+    error.value = 'Google sign-in failed.'
+  }
+}
+
 async function parseUploadedResume() {
   error.value = ''
+
+  if (!await ensureWorkspaceAccess()) {
+    return
+  }
 
   if (!fileInput.value) {
     error.value = 'Choose a PDF or DOCX resume before continuing.'
@@ -679,7 +725,7 @@ async function parseUploadedResume() {
     const form = new FormData()
     form.append('file', fileInput.value)
     const response = await axios.post<{ parsed: ParsedResume }>(`${apiBase}/resume/parse`, form, {
-      headers: await getOptionalAuthHeaders(),
+      headers: await getWorkspaceHeaders(),
     })
     parsedResume.value = response.data.parsed
     currentStep.value = 2
@@ -713,6 +759,10 @@ function useExampleSuggestions() {
 async function importJob() {
   error.value = ''
   importedJob.value = null
+
+  if (!await ensureWorkspaceAccess()) {
+    return
+  }
 
   if (!jobUrl.value.trim()) {
     error.value = 'Paste a job URL before importing.'
@@ -749,13 +799,17 @@ function advanceFromJobInput() {
 }
 
 async function submitResumeRequest(endpoint: string, form: FormData, nextMode: ActionMode) {
+  if (!await ensureWorkspaceAccess()) {
+    return
+  }
+
   loading.value = true
   activeAction.value = nextMode
   startLoadingTicker()
 
   try {
     const response = await axios.post<{ result: PipelineResult }>(`${apiBase}${endpoint}`, form, {
-      headers: await getOptionalAuthHeaders(),
+      headers: await getWorkspaceHeaders(),
     })
     result.value = response.data?.result ?? null
     if (response.data?.result?.parsed) {
@@ -816,6 +870,9 @@ async function applyTopIssues() {
   if (!result.value) {
     return false
   }
+  if (!await ensureWorkspaceAccess()) {
+    return false
+  }
   if (!parsedResume.value?.document || !result.value.optimized?.document || !jobDescription.value.trim()) {
     error.value = 'A parsed resume, optimized draft, and job description are required before applying fixes.'
     return false
@@ -843,7 +900,7 @@ async function applyTopIssues() {
       parsed_resume_id: result.value.parsed.id,
       parent_version_id: currentVersionSnapshot.value?.id,
     }, {
-      headers: await getOptionalAuthHeaders(),
+      headers: await getWorkspaceHeaders(),
     })
 
     const nextResult = response.data.result
@@ -1073,6 +1130,9 @@ async function applyBulletEdit() {
   if (!result.value || !parsedResume.value?.document || !result.value.optimized?.document || !editingComparison.value) {
     return
   }
+  if (!await ensureWorkspaceAccess()) {
+    return
+  }
   if (!editInstruction.value.trim()) {
     editError.value = 'Describe how the bullet should change.'
     return
@@ -1108,7 +1168,7 @@ async function applyBulletEdit() {
         bullet_index: editingComparison.value.bullet_index,
       },
     }, {
-      headers: await getOptionalAuthHeaders(),
+      headers: await getWorkspaceHeaders(),
     })
 
     const nextResult = response.data.result
@@ -1193,6 +1253,12 @@ watch(result, (nextResult) => {
     : nextResult.parsed.text ?? ''
 })
 
+watch(signedInUser, (nextUser) => {
+  if (nextUser && error.value === workspaceSignInMessage) {
+    error.value = ''
+  }
+})
+
 watch([jobDescription, suggestionsText, jobUrl, mode], () => {
   if (result.value) {
     clearResultState()
@@ -1214,6 +1280,35 @@ onBeforeUnmount(() => {
         :unlocked-step="unlockedStep"
         @select="goToStep"
       />
+
+      <article class="sidebar-card account-card" :data-state="authPending ? 'pending' : authGateVisible ? 'locked' : 'ready'">
+        <p class="sidebar-kicker">Account</p>
+        <h3 v-if="authPending">Checking sign-in</h3>
+        <h3 v-else-if="authGateVisible">Sign in required</h3>
+        <h3 v-else-if="authState.enabled">Workspace connected</h3>
+        <h3 v-else>Local mode</h3>
+
+        <p v-if="authPending" class="account-copy">
+          Verifying your Firebase session before we attach resume versions and portfolio state to one account.
+        </p>
+        <template v-else-if="authGateVisible">
+          <p class="account-copy">
+            Sign in with Google before uploading a resume so every parsed version, optimization pass, and portfolio
+            proof card stays under the same workspace.
+          </p>
+          <button class="account-button" type="button" :disabled="authState.busy" @click="handleWorkspaceSignIn">
+            {{ authState.busy ? 'Signing in…' : 'Continue with Google' }}
+          </button>
+        </template>
+        <template v-else-if="authState.enabled">
+          <p class="account-copy">
+            Resume history and portfolio activity will save to <strong>{{ accountLabel }}</strong>.
+          </p>
+        </template>
+        <p v-else class="account-copy">
+          Firebase auth is not configured in this environment, so the wizard is running in local fallback mode.
+        </p>
+      </article>
 
       <article class="sidebar-card">
         <p class="sidebar-kicker">System state</p>
@@ -1256,8 +1351,31 @@ onBeforeUnmount(() => {
         <p>{{ error }}</p>
       </section>
 
+      <section v-if="authPending" class="auth-gate-panel">
+        <p class="step-kicker">Account check</p>
+        <h3>Loading workspace access</h3>
+        <p>
+          We are confirming the account session before exposing the resume workflow.
+        </p>
+      </section>
+
+      <section v-else-if="authGateVisible" class="auth-gate-panel">
+        <p class="step-kicker">Account-backed workflow</p>
+        <h3>Sign in before you start</h3>
+        <p>
+          ApplyPilot now treats resume optimization and portfolio building as one connected workspace. Sign in with
+          Google so uploads, version history, and public profile data all belong to the same user.
+        </p>
+        <div class="auth-gate-actions">
+          <button class="primary" type="button" :disabled="authState.busy" @click="handleWorkspaceSignIn">
+            {{ authState.busy ? 'Signing in…' : 'Continue with Google' }}
+          </button>
+          <RouterLink class="ghost-link" to="/dashboard/portfolio">View portfolio workspace</RouterLink>
+        </div>
+      </section>
+
       <StepUpload
-        v-if="currentStep === 1"
+        v-else-if="currentStep === 1"
         :file-name="uploadedFileName"
         :file-size="uploadedFileSize"
         :parsing="parsing"
@@ -1453,6 +1571,32 @@ onBeforeUnmount(() => {
   color: #5f6c80;
 }
 
+.account-card[data-state='locked'] {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 250, 235, 0.9));
+}
+
+.account-card[data-state='ready'] {
+  border-color: rgba(16, 185, 129, 0.18);
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(255, 255, 255, 0.92));
+}
+
+.account-copy {
+  margin: 14px 0 0;
+  color: #5f6c80;
+  line-height: 1.6;
+}
+
+.account-button {
+  margin-top: 16px;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 16px;
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(135deg, #14213d, #2563eb);
+}
+
 .wizard-main {
   min-width: 0;
   min-height: 0;
@@ -1471,6 +1615,59 @@ onBeforeUnmount(() => {
 
 .error-card p {
   margin: 6px 0 0;
+}
+
+.auth-gate-panel {
+  display: grid;
+  gap: 18px;
+  padding: 32px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 30px;
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(255, 250, 235, 0.9));
+  box-shadow: 0 24px 52px rgba(20, 33, 61, 0.08);
+}
+
+.auth-gate-panel h3 {
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  line-height: 0.96;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+}
+
+.auth-gate-panel p:last-of-type {
+  max-width: 62ch;
+  margin: 0;
+  color: #4f5e75;
+  line-height: 1.7;
+}
+
+.auth-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.auth-gate-actions .primary,
+.ghost-link {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 48px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.auth-gate-actions .primary {
+  border: 0;
+  color: #fff;
+  background: linear-gradient(135deg, #14213d, #2563eb);
+}
+
+.ghost-link {
+  color: #8b5e34;
+  background: rgba(255, 244, 214, 0.94);
 }
 
 @media (max-width: 1100px) {

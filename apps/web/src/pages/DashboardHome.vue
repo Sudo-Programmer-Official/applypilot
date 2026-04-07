@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { authState, signInWithGoogle } from '../lib/firebaseAuth'
 import { previewResumeHistory } from '../content/productPreview'
 
 const launchNotes = [
@@ -12,6 +13,14 @@ const portfolioNotes = [
   'Log work in plain language instead of filling long forms.',
   'Publish a public profile with activity, proof cards, and stack signals.',
 ]
+
+async function handleGoogleSignIn() {
+  try {
+    await signInWithGoogle()
+  } catch {
+    // Resume wizard and portfolio workspace surface detailed auth errors.
+  }
+}
 </script>
 
 <template>
@@ -27,11 +36,44 @@ const portfolioNotes = [
       </div>
 
       <div class="hero-actions">
+        <button
+          v-if="authState.enabled && !authState.user"
+          class="hero-button auth"
+          type="button"
+          :disabled="authState.busy"
+          @click="handleGoogleSignIn"
+        >
+          {{ authState.busy ? 'Signing in…' : 'Continue with Google' }}
+        </button>
+        <span v-else-if="authState.user" class="account-pill">
+          {{ authState.user.displayName || authState.user.email || 'Signed in' }}
+        </span>
         <RouterLink class="hero-button primary" to="/dashboard/wizard">New Optimization</RouterLink>
         <RouterLink class="hero-button secondary" to="/dashboard/portfolio">Portfolio Workspace</RouterLink>
         <RouterLink class="hero-button tertiary" to="/dashboard/history">Resume History</RouterLink>
       </div>
     </header>
+
+    <article v-if="authState.enabled" class="page-card account-card" :data-state="authState.user ? 'ready' : 'locked'">
+      <div>
+        <p class="section-kicker">Account workspace</p>
+        <h2>{{ authState.user ? 'Resume and portfolio are linked' : 'Sign in before you start' }}</h2>
+        <p class="card-copy">
+          {{ authState.user
+            ? `New resume uploads, optimization history, and portfolio proof now save to ${authState.user.displayName || authState.user.email || 'your account'}.`
+            : 'ApplyPilot now stores resume history and portfolio activity together. Sign in once so every optimization and public profile update belongs to the same workspace.' }}
+        </p>
+      </div>
+      <button
+        v-if="!authState.user"
+        class="inline-button"
+        type="button"
+        :disabled="authState.busy"
+        @click="handleGoogleSignIn"
+      >
+        {{ authState.busy ? 'Signing in…' : 'Continue with Google' }}
+      </button>
+    </article>
 
     <div class="dashboard-grid">
       <article class="page-card primary-card">
@@ -192,9 +234,45 @@ const portfolioNotes = [
   background: rgba(255, 244, 214, 0.92);
 }
 
+.hero-button.auth {
+  border: 0;
+  color: #14213d;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+}
+
 .hero-button.tertiary {
   color: #124084;
   background: rgba(219, 234, 254, 0.9);
+}
+
+.account-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+}
+
+.account-card[data-state='locked'] {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 250, 235, 0.9));
+}
+
+.account-card[data-state='ready'] {
+  border-color: rgba(16, 185, 129, 0.16);
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(255, 255, 255, 0.94));
+}
+
+.account-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 12px 16px;
+  border-radius: 999px;
+  color: #124084;
+  font-weight: 700;
+  background: rgba(219, 234, 254, 0.92);
 }
 
 .dashboard-grid,
@@ -286,6 +364,11 @@ const portfolioNotes = [
   }
 
   .page-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .account-card {
     flex-direction: column;
     align-items: stretch;
   }

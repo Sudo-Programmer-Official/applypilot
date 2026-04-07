@@ -119,3 +119,16 @@ def require_firebase_identity(
             detail="Sign in with Google to access private portfolio data.",
         )
     return identity
+
+
+def require_workspace_identity(
+    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+) -> FirebaseIdentity | None:
+    if not _firebase_is_configured():
+        return None
+    if identity is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in with Google to keep resume history and portfolio data in one workspace.",
+        )
+    return identity

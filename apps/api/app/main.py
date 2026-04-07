@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from .auth import FirebaseIdentity, optional_firebase_identity, require_firebase_identity
+from .auth import FirebaseIdentity, require_firebase_identity, require_workspace_identity
 from .config import settings
 from .models.edit import ResumeEditRequest
 from .models.export import ResumeDownloadRequest
@@ -221,7 +221,7 @@ async def import_job(request: JobImportRequest):
 @app.post("/resume/parse")
 async def parse_resume_upload(
     file: UploadFile = File(...),
-    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+    identity: FirebaseIdentity | None = Depends(require_workspace_identity),
 ):
     filename, temp_path, size_bytes, file_hash = await _store_upload(file)
     owner_firebase_uid = identity.uid if identity else None
@@ -336,7 +336,7 @@ async def analyze_resume(
     file: UploadFile = File(...),
     job_description: str | None = Form(default=None),
     job_url: str | None = Form(default=None),
-    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+    identity: FirebaseIdentity | None = Depends(require_workspace_identity),
 ):
     """
     Upload a resume file and run the pipeline.
@@ -407,7 +407,7 @@ async def analyze_resume(
 async def apply_resume_suggestions(
     file: UploadFile = File(...),
     suggestions: str = Form(...),
-    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+    identity: FirebaseIdentity | None = Depends(require_workspace_identity),
 ):
     if not suggestions.strip():
         raise HTTPException(status_code=400, detail="Paste at least one suggestion before applying changes.")
@@ -472,7 +472,7 @@ async def apply_resume_suggestions(
 @app.post("/resume/edit")
 async def edit_resume(
     payload: ResumeEditRequest,
-    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+    identity: FirebaseIdentity | None = Depends(require_workspace_identity),
 ):
     try:
         edit_result = apply_resume_edit(
@@ -520,7 +520,7 @@ async def edit_resume(
 @app.post("/resume/apply_fixes")
 async def apply_resume_fix_pass(
     payload: ResumeFixRequest,
-    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+    identity: FirebaseIdentity | None = Depends(require_workspace_identity),
 ):
     try:
         fix_result = apply_resume_fixes(
