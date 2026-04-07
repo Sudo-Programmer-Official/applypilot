@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+
 import PublicLayout from '../components/marketing/PublicLayout.vue'
 import { blogPosts } from '../content/blogPosts'
 import { seoLandingPages } from '../content/seoLandingPages'
+import { authState, signInWithGoogle } from '../lib/firebaseAuth'
 
 const featureCards = [
   {
@@ -20,6 +24,28 @@ const featureCards = [
 
 const workflowSteps = ['Upload', 'Target role', 'Optimize', 'Export']
 const featuredPosts = blogPosts.slice(0, 3)
+const router = useRouter()
+
+const primaryCtaLabel = computed(() => {
+  if (authState.enabled && !authState.user) {
+    return authState.busy ? 'Signing in…' : 'Start with Google'
+  }
+  return 'Open Dashboard'
+})
+
+async function handlePrimaryCta() {
+  if (!authState.enabled || authState.user) {
+    await router.push('/dashboard')
+    return
+  }
+
+  try {
+    await signInWithGoogle()
+    await router.push('/dashboard')
+  } catch {
+    await router.push('/signin')
+  }
+}
 </script>
 
 <template>
@@ -35,7 +61,9 @@ const featuredPosts = blogPosts.slice(0, 3)
           </p>
 
           <div class="hero-actions">
-            <RouterLink class="cta-button" to="/dashboard/wizard">Try it free</RouterLink>
+            <button class="cta-button" type="button" :disabled="authState.busy" @click="handlePrimaryCta">
+              {{ primaryCtaLabel }}
+            </button>
             <RouterLink class="ghost-button" to="/blog">Read the blog</RouterLink>
           </div>
         </div>
@@ -183,8 +211,13 @@ const featuredPosts = blogPosts.slice(0, 3)
 }
 
 .cta-button {
+  border: 0;
   color: #fff;
   background: linear-gradient(135deg, #14213d, #2563eb);
+}
+
+.cta-button:disabled {
+  opacity: 0.7;
 }
 
 .ghost-button {

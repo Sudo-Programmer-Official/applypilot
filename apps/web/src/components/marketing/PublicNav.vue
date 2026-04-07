@@ -1,10 +1,27 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
+
 import { seoLandingPages } from '../../content/seoLandingPages'
+import { authState, signInWithGoogle } from '../../lib/firebaseAuth'
 
 const toolLinks = seoLandingPages.map((page) => ({
   label: page.navLabel,
   to: `/${page.slug}`,
 }))
+
+const router = useRouter()
+
+const workspaceCtaLabel = computed(() => (authState.user ? 'Open Dashboard' : 'Sign in'))
+
+async function handlePublicSignIn() {
+  try {
+    await signInWithGoogle()
+    await router.push('/dashboard')
+  } catch {
+    await router.push('/signin')
+  }
+}
 </script>
 
 <template>
@@ -29,7 +46,18 @@ const toolLinks = seoLandingPages.map((page) => ({
           <RouterLink class="nav-link muted" to="/dashboard">Dashboard</RouterLink>
         </nav>
 
-        <RouterLink class="cta-button" to="/dashboard/wizard">Try ApplyPilot</RouterLink>
+        <button
+          v-if="authState.enabled && !authState.user"
+          class="cta-button"
+          type="button"
+          :disabled="authState.busy"
+          @click="handlePublicSignIn"
+        >
+          {{ authState.busy ? 'Signing in…' : 'Continue with Google' }}
+        </button>
+        <RouterLink v-else class="cta-button" to="/dashboard">
+          {{ workspaceCtaLabel }}
+        </RouterLink>
       </div>
     </div>
   </header>
@@ -136,9 +164,14 @@ const toolLinks = seoLandingPages.map((page) => ({
 }
 
 .cta-button {
+  border: 0;
   color: #fff;
   background: linear-gradient(135deg, #14213d, #2563eb);
   box-shadow: 0 12px 28px rgba(37, 99, 235, 0.24);
+}
+
+.cta-button:disabled {
+  opacity: 0.7;
 }
 
 @media (max-width: 960px) {

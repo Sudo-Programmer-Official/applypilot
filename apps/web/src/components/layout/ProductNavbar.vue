@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
+
 import { authState, signInWithGoogle, signOutCurrentUser } from '../../lib/firebaseAuth'
+
+const router = useRouter()
 
 async function handleGoogleSignIn() {
   try {
@@ -12,6 +16,7 @@ async function handleGoogleSignIn() {
 async function handleSignOut() {
   try {
     await signOutCurrentUser()
+    await router.push('/')
   } catch {
     // Keep navbar interaction quiet. Portfolio page surfaces the detailed auth state.
   }

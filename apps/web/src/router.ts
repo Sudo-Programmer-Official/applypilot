@@ -21,7 +21,9 @@ import PrivacyPage from './pages/PrivacyPage.vue'
 import ProductLayout from './pages/ProductLayout.vue'
 import PublicProfilePage from './pages/PublicProfilePage.vue'
 import SeoLandingPage from './pages/SeoLandingPage.vue'
+import SignInPage from './pages/SignInPage.vue'
 import TermsPage from './pages/TermsPage.vue'
+import { authState, waitForAuthReady } from './lib/firebaseAuth'
 
 const publicToolRoutes = seoLandingPages.map((page) => ({
   path: `/${page.slug}`,
@@ -113,6 +115,9 @@ const router = createRouter({
     {
       path: '/dashboard',
       component: ProductLayout,
+      meta: {
+        requiresAuth: true,
+      },
       children: [
         {
           path: '',
@@ -165,6 +170,17 @@ const router = createRouter({
       redirect: '/dashboard/wizard',
     },
     {
+      path: '/signin',
+      name: 'signin',
+      component: SignInPage,
+      meta: {
+        title: 'Sign In | ApplyPilot',
+        description: 'Sign in with Google to access your ApplyPilot workspace.',
+        canonicalPath: '/signin',
+        robots: 'noindex, nofollow',
+      },
+    },
+    {
       path: '/public/:username',
       name: 'public-profile',
       component: PublicProfilePage,
@@ -199,6 +215,32 @@ const router = createRouter({
       redirect: '/',
     },
   ],
+})
+
+router.beforeEach(async (to) => {
+  await waitForAuthReady()
+
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
+  const isSignedIn = Boolean(authState.user)
+
+  if (requiresAuth && authState.enabled && !isSignedIn) {
+    return {
+      name: 'signin',
+      query: {
+        redirect: to.fullPath,
+      },
+    }
+  }
+
+  if (to.name === 'signin' && authState.enabled && isSignedIn) {
+    const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : '/dashboard'
+    if (redirect.startsWith('/') && !redirect.startsWith('//') && !redirect.startsWith('/signin')) {
+      return redirect
+    }
+    return '/dashboard'
+  }
+
+  return true
 })
 
 router.afterEach((to) => {

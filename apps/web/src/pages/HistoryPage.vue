@@ -9,8 +9,8 @@ import { previewResumeHistory } from '../content/productPreview'
         <p class="page-kicker">History</p>
         <h1>Recent resume versions</h1>
         <p>
-          Authentication is the next step, but the product shell is already prepared for saved optimization history and
-          role-targeted resume versions.
+          Review the saved resume versions attached to your workspace, then reopen the wizard or portfolio without
+          losing account context.
         </p>
       </div>
 
