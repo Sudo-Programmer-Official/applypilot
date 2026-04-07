@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from packages.postgres_store.store import ensure_schema, persist_pipeline_result, persist_resume_version
+from packages.postgres_store.store import (
+    bootstrap_portfolio_profile,
+    ensure_schema,
+    persist_pipeline_result,
+    persist_portfolio_activity,
+    persist_resume_version,
+)
 
 
 class PostgresStoreTests(unittest.TestCase):
@@ -12,7 +18,7 @@ class PostgresStoreTests(unittest.TestCase):
 
         class FakeCursor:
             def __init__(self) -> None:
-                self._fetch_queue = [(301,), (401,), (501,)]
+                self._fetch_queue = [None, (301,), (401,), (501,)]
 
             def __enter__(self):
                 return self
@@ -96,6 +102,8 @@ class PostgresStoreTests(unittest.TestCase):
             def fetchone(self):
                 if "COALESCE(MAX(version_number)" in executed[-1][0]:
                     return {"next_version": 3}
+                if executed[-1][0] == "SELECT 1":
+                    return (1,)
                 return {
                     "id": 901,
                     "parsed_resume_id": 301,
@@ -134,6 +142,249 @@ class PostgresStoreTests(unittest.TestCase):
         self.assertEqual(version["version_number"], 3)
         self.assertEqual(version["metadata"]["score_delta"], 3)
         self.assertIn("INSERT INTO resume_versions (", [sql for sql, _ in executed])
+
+    def test_bootstrap_portfolio_profile_seeds_projects_and_activity(self) -> None:
+        executed: list[tuple[str, object]] = []
+
+        class FakeCursor:
+            def __init__(self) -> None:
+                self.fetchone_queue = [
+                    {
+                        "id": 301,
+                        "owner_firebase_uid": "firebase-uid-123",
+                        "source_file_name": "resume.pdf",
+                        "source_file_hash": "hash123",
+                        "source_format": "pdf",
+                        "parser_version": "layout_v1",
+                        "structured_resume": {
+                            "name": "Abhishek Jha",
+                            "title": "Senior Backend Engineer",
+                            "summary": "Builds ETL and platform workflows.",
+                            "skills": {
+                                "Languages": ["Python", "SQL"],
+                                "Cloud": ["AWS", "Lambda"],
+                            },
+                            "experience": [
+                                {
+                                    "role": "Backend Engineer",
+                                    "company": "Braintree Health",
+                                    "date": "2025",
+                                    "bullets": [
+                                        "Optimized AWS Glue pipeline and reduced runtime from 6 hours to 1.5 hours.",
+                                        "Built Lambda orchestration for ETL retries.",
+                                    ],
+                                }
+                            ],
+                            "projects": [],
+                        },
+                        "normalized_text": "resume text",
+                        "created_at": None,
+                    },
+                    {
+                        "id": 91,
+                        "firebase_uid": "firebase-uid-123",
+                        "username": "abhishek-jha",
+                        "display_name": "Abhishek Jha",
+                        "headline": "Senior Backend Engineer building visible, proof-backed work",
+                        "summary": "Builds ETL and platform workflows.",
+                        "location": "",
+                        "primary_role": "Senior Backend Engineer",
+                        "contact_email": "",
+                        "email": "abhishek@example.com",
+                        "photo_url": "",
+                        "hiring_status": "open",
+                        "hero_statement": "Live signal over static claims.",
+                        "resume_snapshot": {},
+                        "metadata": {"resume_version_count": 1},
+                        "last_login_at": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    },
+                    {
+                        "id": 91,
+                        "firebase_uid": "firebase-uid-123",
+                        "username": "abhishek-jha",
+                        "display_name": "Abhishek Jha",
+                        "headline": "Senior Backend Engineer building visible, proof-backed work",
+                        "summary": "Builds ETL and platform workflows.",
+                        "location": "",
+                        "primary_role": "Senior Backend Engineer",
+                        "contact_email": "",
+                        "email": "abhishek@example.com",
+                        "photo_url": "",
+                        "hiring_status": "open",
+                        "hero_statement": "Live signal over static claims.",
+                        "resume_snapshot": {},
+                        "metadata": {"resume_version_count": 1},
+                        "last_login_at": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    },
+                    {"id": 401},
+                    {"id": 801},
+                ]
+                self.fetchall_queue = [
+                    [
+                        {
+                            "id": 701,
+                            "version_number": 2,
+                            "source": "manual_edit",
+                            "metadata": {
+                                "reason": "Clarified AWS platform ownership.",
+                                "instruction": "Strengthened pipeline optimization bullet.",
+                                "score_delta": 6,
+                                "edit_type": "bullet_edit",
+                                "target_section": "experience",
+                            },
+                            "created_at": None,
+                        }
+                    ]
+                ]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, sql, params=None):
+                executed.append((sql.strip().splitlines()[0], params))
+
+            def fetchone(self):
+                return self.fetchone_queue.pop(0)
+
+            def fetchall(self):
+                return self.fetchall_queue.pop(0)
+
+        class FakeConnection:
+            def __init__(self) -> None:
+                self.cursor_obj = FakeCursor()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return self.cursor_obj
+
+            def commit(self):
+                executed.append(("COMMIT", None))
+
+        with patch("packages.postgres_store.store.connect", return_value=FakeConnection()), patch(
+            "packages.postgres_store.store.get_portfolio_overview",
+            return_value={"profile": {"username": "abhishek-jha"}, "projects": [], "activity": [], "proof_cards": [], "metrics": {}},
+        ):
+            portfolio = bootstrap_portfolio_profile(
+                "postgresql://example",
+                firebase_uid="firebase-uid-123",
+                username="Abhishek Jha",
+                email="abhishek@example.com",
+                display_name="Abhishek Jha",
+            )
+
+        self.assertEqual(portfolio["profile"]["username"], "abhishek-jha")
+        statements = [sql for sql, _ in executed]
+        self.assertIn("UPDATE developer_profiles", statements)
+        self.assertIn("INSERT INTO portfolio_projects (", statements)
+        self.assertIn("INSERT INTO portfolio_activity_events (", statements)
+        self.assertIn("INSERT INTO proof_artifacts (", statements)
+
+    def test_persist_portfolio_activity_creates_manual_log_and_proof(self) -> None:
+        executed: list[tuple[str, object]] = []
+
+        class FakeCursor:
+            def __init__(self) -> None:
+                self.fetchone_queue = [
+                    {
+                        "id": 91,
+                        "firebase_uid": "firebase-uid-123",
+                        "username": "abhishek-jha",
+                        "display_name": "Abhishek Jha",
+                        "headline": "",
+                        "summary": "",
+                        "location": "",
+                        "primary_role": "",
+                        "contact_email": "",
+                        "email": "abhishek@example.com",
+                        "photo_url": "",
+                        "hiring_status": "open",
+                        "hero_statement": "",
+                        "resume_snapshot": {},
+                        "metadata": {},
+                        "last_login_at": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    },
+                    {"id": 401},
+                    {
+                        "id": 1001,
+                        "project_id": 401,
+                        "event_type": "manual_log",
+                        "title": "Shipped orchestration retry fix",
+                        "detail": "Handled noisy ETL retries with better fan-out control.",
+                        "impact": "Reduced failure volume.",
+                        "source": "manual_log",
+                        "happened_on": None,
+                        "tags": ["aws", "etl"],
+                        "links": ["https://github.com/example/repo/pull/1"],
+                        "proof_json": {"claim": "Reduced ETL failures by 42%."},
+                        "visibility": "public",
+                        "created_at": None,
+                    },
+                ]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, sql, params=None):
+                executed.append((sql.strip().splitlines()[0], params))
+
+            def fetchone(self):
+                return self.fetchone_queue.pop(0)
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                executed.append(("COMMIT", None))
+
+        with patch("packages.postgres_store.store.connect", return_value=FakeConnection()):
+            activity = persist_portfolio_activity(
+                "postgresql://example",
+                {
+                    "project_id": 401,
+                    "title": "Shipped orchestration retry fix",
+                    "detail": "Handled noisy ETL retries with better fan-out control.",
+                    "impact": "Reduced failure volume.",
+                    "tags": ["aws", "etl"],
+                    "links": ["https://github.com/example/repo/pull/1"],
+                    "proof": {
+                        "claim": "Reduced ETL failures by 42%.",
+                        "evidence": "Introduced batched retries and smarter backoff.",
+                        "metric_label": "Failure rate",
+                        "metric_before": "19%",
+                        "metric_after": "11%",
+                    },
+                },
+                firebase_uid="firebase-uid-123",
+            )
+
+        self.assertEqual(activity["title"], "Shipped orchestration retry fix")
+        statements = [sql for sql, _ in executed]
+        self.assertIn("INSERT INTO portfolio_activity_events (", statements)
+        self.assertIn("INSERT INTO proof_artifacts (", statements)
 
 
 if __name__ == "__main__":

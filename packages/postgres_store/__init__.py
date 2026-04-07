@@ -1,21 +1,31 @@
 from .store import (
+    bootstrap_portfolio_profile,
+    ensure_developer_profile,
     ensure_schema,
     get_cached_job,
     get_cached_job_id,
     get_parsed_resume_by_source_hash,
+    get_portfolio_overview,
     persist_pipeline_result,
+    persist_portfolio_activity,
     persist_resume_version,
+    upsert_portfolio_profile,
     upsert_parsed_resume,
     upsert_cached_job,
 )
 
 __all__ = [
+    "bootstrap_portfolio_profile",
+    "ensure_developer_profile",
     "ensure_schema",
     "get_cached_job",
     "get_cached_job_id",
     "get_parsed_resume_by_source_hash",
+    "get_portfolio_overview",
     "persist_pipeline_result",
+    "persist_portfolio_activity",
     "persist_resume_version",
+    "upsert_portfolio_profile",
     "upsert_parsed_resume",
     "upsert_cached_job",
 ]

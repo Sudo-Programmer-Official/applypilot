@@ -16,7 +16,8 @@ import { previewResumeHistory } from '../content/productPreview'
 
       <div class="header-actions">
         <RouterLink class="header-button primary" to="/dashboard/wizard">New Optimization</RouterLink>
-        <RouterLink class="header-button secondary" to="/dashboard">Back to Dashboard</RouterLink>
+        <RouterLink class="header-button secondary" to="/dashboard/portfolio">Portfolio Workspace</RouterLink>
+        <RouterLink class="header-button tertiary" to="/dashboard">Back to Dashboard</RouterLink>
       </div>
     </header>
 
@@ -35,6 +36,7 @@ import { previewResumeHistory } from '../content/productPreview'
 
         <div class="item-actions">
           <RouterLink to="/dashboard/wizard">Open Wizard</RouterLink>
+          <RouterLink to="/dashboard/portfolio">Portfolio</RouterLink>
           <RouterLink to="/privacy">Privacy</RouterLink>
           <RouterLink to="/terms">Terms</RouterLink>
         </div>
@@ -120,6 +122,11 @@ import { previewResumeHistory } from '../content/productPreview'
 .header-button.secondary {
   color: #8b5e34;
   background: rgba(255, 244, 214, 0.92);
+}
+
+.header-button.tertiary {
+  color: #124084;
+  background: rgba(219, 234, 254, 0.9);
 }
 
 .history-list {

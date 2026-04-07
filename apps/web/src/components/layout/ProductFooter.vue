@@ -3,10 +3,10 @@
     <div class="product-footer-inner">
       <div class="footer-brand">
         <p class="footer-kicker">ApplyPilot</p>
-        <strong>Resume workspace</strong>
+        <strong>Career signal workspace</strong>
         <p>
-          Built for focused resume optimization with a cleaner split between marketing, product workflow, and launch
-          essentials.
+          Built for resume optimization, live portfolio generation, and a cleaner split between marketing and product
+          UX.
         </p>
       </div>
 
@@ -15,6 +15,7 @@
           <span class="footer-label">Product</span>
           <RouterLink to="/dashboard">Dashboard</RouterLink>
           <RouterLink to="/dashboard/wizard">Optimize</RouterLink>
+          <RouterLink to="/dashboard/portfolio">Portfolio</RouterLink>
           <RouterLink to="/dashboard/history">History</RouterLink>
         </div>
 

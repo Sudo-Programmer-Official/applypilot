@@ -16,7 +16,8 @@ import ResumeWizard from '../components/wizard/ResumeWizard.vue'
 
       <div class="toolbar-actions">
         <RouterLink class="toolbar-button primary" to="/dashboard">Back to Dashboard</RouterLink>
-        <RouterLink class="toolbar-button secondary" to="/dashboard/history">Resume History</RouterLink>
+        <RouterLink class="toolbar-button secondary" to="/dashboard/portfolio">Portfolio Workspace</RouterLink>
+        <RouterLink class="toolbar-button tertiary" to="/dashboard/history">Resume History</RouterLink>
       </div>
     </section>
 
@@ -99,6 +100,11 @@ import ResumeWizard from '../components/wizard/ResumeWizard.vue'
 .toolbar-button.secondary {
   color: #8b5e34;
   background: rgba(255, 244, 214, 0.92);
+}
+
+.toolbar-button.tertiary {
+  color: #124084;
+  background: rgba(219, 234, 254, 0.9);
 }
 
 .dashboard-workspace {

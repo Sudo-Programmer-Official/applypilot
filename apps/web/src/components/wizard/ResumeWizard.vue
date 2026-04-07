@@ -8,6 +8,7 @@ import StepOptimize from './StepOptimize.vue'
 import StepReview from './StepReview.vue'
 import StepUpload from './StepUpload.vue'
 import StepperWizard from './StepperWizard.vue'
+import { getOptionalAuthHeaders } from '../../lib/firebaseAuth'
 import type {
   ActionMode,
   ConfidenceSnapshot,
@@ -677,7 +678,9 @@ async function parseUploadedResume() {
   try {
     const form = new FormData()
     form.append('file', fileInput.value)
-    const response = await axios.post<{ parsed: ParsedResume }>(`${apiBase}/resume/parse`, form)
+    const response = await axios.post<{ parsed: ParsedResume }>(`${apiBase}/resume/parse`, form, {
+      headers: await getOptionalAuthHeaders(),
+    })
     parsedResume.value = response.data.parsed
     currentStep.value = 2
   } catch (unknownError: unknown) {
@@ -751,7 +754,9 @@ async function submitResumeRequest(endpoint: string, form: FormData, nextMode: A
   startLoadingTicker()
 
   try {
-    const response = await axios.post<{ result: PipelineResult }>(`${apiBase}${endpoint}`, form)
+    const response = await axios.post<{ result: PipelineResult }>(`${apiBase}${endpoint}`, form, {
+      headers: await getOptionalAuthHeaders(),
+    })
     result.value = response.data?.result ?? null
     if (response.data?.result?.parsed) {
       parsedResume.value = response.data.result.parsed
@@ -837,6 +842,8 @@ async function applyTopIssues() {
       missing_signals: missingSkillNames.value,
       parsed_resume_id: result.value.parsed.id,
       parent_version_id: currentVersionSnapshot.value?.id,
+    }, {
+      headers: await getOptionalAuthHeaders(),
     })
 
     const nextResult = response.data.result
@@ -1100,6 +1107,8 @@ async function applyBulletEdit() {
         entry_index: editingComparison.value.entry_index,
         bullet_index: editingComparison.value.bullet_index,
       },
+    }, {
+      headers: await getOptionalAuthHeaders(),
     })
 
     const nextResult = response.data.result

@@ -3,8 +3,14 @@ import { previewResumeHistory } from '../content/productPreview'
 
 const launchNotes = [
   'Start a new optimization in the guided wizard.',
-  'Keep space reserved for resume history before auth arrives.',
-  'Ship with Privacy Policy and Terms linked from the product.',
+  'Sync that history into a live public profile.',
+  'Keep privacy, terms, and product surfaces split cleanly.',
+]
+
+const portfolioNotes = [
+  'Bootstrap projects from the latest structured resume.',
+  'Log work in plain language instead of filling long forms.',
+  'Publish a public profile with activity, proof cards, and stack signals.',
 ]
 </script>
 
@@ -13,16 +19,17 @@ const launchNotes = [
     <header class="page-card page-hero">
       <div class="hero-copy">
         <p class="page-kicker">Dashboard</p>
-        <h1>Resume workspace</h1>
+        <h1>Career signal workspace</h1>
         <p>
-          Start a new optimization, keep future history in one place, and preserve a clean separation between
-          marketing and product UX.
+          Optimize the resume, turn it into a living public profile, and keep proof of work in one focused product
+          shell.
         </p>
       </div>
 
       <div class="hero-actions">
         <RouterLink class="hero-button primary" to="/dashboard/wizard">New Optimization</RouterLink>
-        <RouterLink class="hero-button secondary" to="/dashboard/history">Resume History</RouterLink>
+        <RouterLink class="hero-button secondary" to="/dashboard/portfolio">Portfolio Workspace</RouterLink>
+        <RouterLink class="hero-button tertiary" to="/dashboard/history">Resume History</RouterLink>
       </div>
     </header>
 
@@ -45,16 +52,34 @@ const launchNotes = [
       <article class="page-card">
         <div class="card-head">
           <div>
+            <p class="section-kicker">Living profile</p>
+            <h2>Portfolio workspace</h2>
+          </div>
+          <span class="status-pill">New</span>
+        </div>
+
+        <p class="card-copy">
+          Convert resume data and daily work logs into a shareable developer profile with activity, proof cards, and
+          generated projects.
+        </p>
+
+        <ul class="check-list">
+          <li v-for="note in portfolioNotes" :key="note">{{ note }}</li>
+        </ul>
+
+        <RouterLink class="inline-button" to="/dashboard/portfolio">Open Portfolio Workspace</RouterLink>
+      </article>
+    </div>
+
+    <div class="bottom-grid">
+      <article class="page-card compact-card">
+        <div class="card-head">
+          <div>
             <p class="section-kicker">Recent resumes</p>
             <h2>History-ready layout</h2>
           </div>
           <span class="status-pill">Preview</span>
         </div>
-
-        <p class="card-copy">
-          Saved optimizations will live here after authentication. This preview keeps the dashboard structure stable
-          before accounts ship.
-        </p>
 
         <div class="resume-list">
           <article v-for="resume in previewResumeHistory" :key="resume.id" class="resume-item">
@@ -66,17 +91,6 @@ const launchNotes = [
             <small>{{ resume.summary }}</small>
           </article>
         </div>
-      </article>
-    </div>
-
-    <div class="bottom-grid">
-      <article class="page-card compact-card">
-        <p class="section-kicker">Responsive</p>
-        <h2>Desktop, iPad, and mobile ready</h2>
-        <p class="card-copy">
-          The product shell uses fixed-height desktop workspace behavior, then drops back to natural page flow on
-          narrower screens for easier touch interaction.
-        </p>
       </article>
 
       <article class="page-card compact-card">
@@ -176,6 +190,11 @@ const launchNotes = [
 .hero-button.secondary {
   color: #8b5e34;
   background: rgba(255, 244, 214, 0.92);
+}
+
+.hero-button.tertiary {
+  color: #124084;
+  background: rgba(219, 234, 254, 0.9);
 }
 
 .dashboard-grid,

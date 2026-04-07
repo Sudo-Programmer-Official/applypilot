@@ -92,6 +92,18 @@ function toneForCheck(check: ConfidenceCheck) {
         </ul>
       </article>
     </div>
+
+    <div class="portfolio-cta">
+      <div>
+        <p class="eyebrow">Next step</p>
+        <h5>Turn this resume proof into a live public profile.</h5>
+        <p class="subtitle">
+          Sync the latest structured resume into projects, proof cards, and a shareable developer activity feed.
+        </p>
+      </div>
+
+      <RouterLink class="cta-link" to="/dashboard/portfolio">Open Portfolio Workspace</RouterLink>
+    </div>
   </article>
 </template>
 
@@ -192,7 +204,8 @@ h5 {
 .comparison-tile,
 .verification-tile,
 .check-card,
-.detail-panel {
+.detail-panel,
+.portfolio-cta {
   padding: 16px;
   border-radius: 20px;
   background: rgba(20, 33, 61, 0.05);
@@ -239,6 +252,26 @@ h5 {
   padding-left: 18px;
 }
 
+.portfolio-cta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(255, 248, 235, 0.96), rgba(255, 255, 255, 0.92));
+}
+
+.cta-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 210px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(135deg, #14213d, #2563eb);
+}
+
 @media (max-width: 1100px) {
   .check-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -248,6 +281,11 @@ h5 {
 @media (max-width: 720px) {
   .confidence-header {
     flex-direction: column;
+  }
+
+  .portfolio-cta {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .comparison-row,

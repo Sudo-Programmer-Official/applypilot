@@ -8,26 +8,40 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import requests
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
+from .auth import FirebaseIdentity, optional_firebase_identity, require_firebase_identity
 from .config import settings
 from .models.edit import ResumeEditRequest
 from .models.export import ResumeDownloadRequest
 from .models.fix import ResumeFixRequest
 from .models.job_import import JobImportRequest, JobImportResponse
+from .models.portfolio import (
+    PortfolioActivityCreateRequest,
+    PortfolioBootstrapRequest,
+    PortfolioOverviewResponse,
+    PortfolioProfileResponse,
+    PortfolioProfileUpdateRequest,
+    PublicPortfolioOverviewResponse,
+)
 from .orchestrator.resume_pipeline import run_resume_pipeline
 from .orchestrator.suggestion_pipeline import apply_suggestion_pipeline
 from packages.ai_engine import apply_resume_edit, apply_resume_fixes
 from packages.ai_engine.polish import polish_resume_text
 from packages.job_importer import import_job_posting
 from packages.postgres_store import (
+    bootstrap_portfolio_profile,
+    ensure_developer_profile,
     ensure_schema,
     get_parsed_resume_by_source_hash,
+    get_portfolio_overview,
     persist_pipeline_result,
+    persist_portfolio_activity,
     persist_resume_version,
+    upsert_portfolio_profile,
     upsert_parsed_resume,
 )
 from packages.resume_formatter.builder import build_resume_document
@@ -75,6 +89,106 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get("/portfolio/me", response_model=PortfolioOverviewResponse)
+async def get_portfolio_me(identity: FirebaseIdentity = Depends(require_firebase_identity)):
+    ensure_developer_profile(
+        settings.database_url,
+        firebase_uid=identity.uid,
+        email=identity.email,
+        display_name=identity.display_name,
+        photo_url=identity.photo_url,
+    )
+    portfolio = get_portfolio_overview(settings.database_url, firebase_uid=identity.uid, public_only=False)
+    if portfolio is None:
+        raise HTTPException(status_code=404, detail="No portfolio exists yet. Bootstrap one from your resume first.")
+    return portfolio
+
+
+@app.get("/portfolio/public/{username}", response_model=PublicPortfolioOverviewResponse)
+async def get_public_portfolio(username: str):
+    portfolio = get_portfolio_overview(settings.database_url, username=username, public_only=True)
+    if portfolio is None:
+        raise HTTPException(status_code=404, detail="Public profile not found.")
+    return _serialize_public_portfolio(portfolio)
+
+
+@app.post("/portfolio/bootstrap", response_model=PortfolioOverviewResponse)
+async def bootstrap_portfolio(
+    payload: PortfolioBootstrapRequest,
+    identity: FirebaseIdentity = Depends(require_firebase_identity),
+):
+    ensure_developer_profile(
+        settings.database_url,
+        firebase_uid=identity.uid,
+        email=identity.email,
+        display_name=identity.display_name,
+        photo_url=identity.photo_url,
+        username=payload.username,
+    )
+    portfolio = bootstrap_portfolio_profile(
+        settings.database_url,
+        firebase_uid=identity.uid,
+        username=payload.username,
+        parsed_resume_id=payload.parsed_resume_id,
+        email=identity.email,
+        display_name=identity.display_name,
+        photo_url=identity.photo_url,
+    )
+    if portfolio is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No resume owned by this account is available yet. Run the resume workflow after signing in.",
+        )
+    return portfolio
+
+
+@app.patch("/portfolio/me", response_model=PortfolioProfileResponse)
+async def update_portfolio_profile(
+    payload: PortfolioProfileUpdateRequest,
+    identity: FirebaseIdentity = Depends(require_firebase_identity),
+):
+    try:
+        profile = upsert_portfolio_profile(
+            settings.database_url,
+            payload.model_dump(),
+            firebase_uid=identity.uid,
+            email=identity.email,
+            display_name=identity.display_name,
+            photo_url=identity.photo_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Portfolio profile update failed")
+        raise HTTPException(status_code=500, detail="Portfolio profile update failed.") from exc
+
+    if profile is None:
+        raise HTTPException(status_code=503, detail="Portfolio persistence is unavailable.")
+    return profile
+
+
+@app.post("/portfolio/activity")
+async def create_portfolio_activity(
+    payload: PortfolioActivityCreateRequest,
+    identity: FirebaseIdentity = Depends(require_firebase_identity),
+):
+    try:
+        activity = persist_portfolio_activity(
+            settings.database_url,
+            payload.model_dump(),
+            firebase_uid=identity.uid,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Portfolio activity logging failed")
+        raise HTTPException(status_code=500, detail="Portfolio activity logging failed.") from exc
+
+    if activity is None:
+        raise HTTPException(status_code=404, detail="Portfolio profile not found.")
+    return {"status": "ok", "activity": activity}
+
+
 @app.post("/job/import", response_model=JobImportResponse)
 async def import_job(request: JobImportRequest):
     logger.info("Importing job url=%s", request.url)
@@ -105,13 +219,21 @@ async def import_job(request: JobImportRequest):
 
 
 @app.post("/resume/parse")
-async def parse_resume_upload(file: UploadFile = File(...)):
+async def parse_resume_upload(
+    file: UploadFile = File(...),
+    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+):
     filename, temp_path, size_bytes, file_hash = await _store_upload(file)
+    owner_firebase_uid = identity.uid if identity else None
 
     logger.info("Parsing resume file=%s size_bytes=%s", filename, size_bytes)
     try:
-        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
-        parsed_resume_id = upsert_parsed_resume(settings.database_url, parsed_resume)
+        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash, owner_firebase_uid=owner_firebase_uid)
+        parsed_resume_id = upsert_parsed_resume(
+            settings.database_url,
+            parsed_resume,
+            owner_firebase_uid=owner_firebase_uid,
+        )
         if parsed_resume_id:
             logger.info("Persisted parsed resume parsed_resume_id=%s", parsed_resume_id)
         return {"status": "ok", "parsed": parsed_resume}
@@ -159,15 +281,41 @@ async def _store_upload(file: UploadFile) -> tuple[str, str, int, str]:
     return filename, temp_path, len(contents), file_hash
 
 
-def _load_parsed_resume(temp_path: str, filename: str, file_hash: str) -> dict:
+def _serialize_public_portfolio(portfolio: dict) -> dict:
+    profile = portfolio.get("profile") or {}
+    return {
+        "profile": {
+            "display_name": profile.get("display_name") or "",
+            "headline": profile.get("headline") or "",
+            "summary": profile.get("summary") or "",
+            "location": profile.get("location") or "",
+            "primary_role": profile.get("primary_role") or "",
+            "hero_statement": profile.get("hero_statement") or "",
+        },
+        "metrics": portfolio.get("metrics") or {},
+        "projects": portfolio.get("projects") or [],
+        "activity": portfolio.get("activity") or [],
+        "proof_cards": portfolio.get("proof_cards") or [],
+    }
+
+
+def _load_parsed_resume(
+    temp_path: str,
+    filename: str,
+    file_hash: str,
+    owner_firebase_uid: str | None = None,
+) -> dict:
     parsed_resume = get_parsed_resume_by_source_hash(
         settings.database_url,
         file_hash,
         parser_version=PARSER_VERSION,
+        owner_firebase_uid=owner_firebase_uid,
     )
     if parsed_resume:
         parsed_resume["file_name"] = filename
         parsed_resume.setdefault("metadata", {})["source_file_hash"] = file_hash
+        if owner_firebase_uid:
+            parsed_resume.setdefault("metadata", {})["owner_firebase_uid"] = owner_firebase_uid
         logger.info(
             "Reusing parsed resume parsed_resume_id=%s file_hash=%s",
             parsed_resume.get("id"),
@@ -178,6 +326,8 @@ def _load_parsed_resume(temp_path: str, filename: str, file_hash: str) -> dict:
     parsed_resume = parse_resume(temp_path)
     parsed_resume["file_name"] = filename
     parsed_resume.setdefault("metadata", {})["source_file_hash"] = file_hash
+    if owner_firebase_uid:
+        parsed_resume.setdefault("metadata", {})["owner_firebase_uid"] = owner_firebase_uid
     return parsed_resume
 
 
@@ -186,6 +336,7 @@ async def analyze_resume(
     file: UploadFile = File(...),
     job_description: str | None = Form(default=None),
     job_url: str | None = Form(default=None),
+    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
 ):
     """
     Upload a resume file and run the pipeline.
@@ -193,12 +344,18 @@ async def analyze_resume(
     Accepts PDF or DOCX uploads. Job description is optional for now.
     """
     filename, temp_path, size_bytes, file_hash = await _store_upload(file)
+    owner_firebase_uid = identity.uid if identity else None
 
     logger.info("Analyzing resume file=%s size_bytes=%s", filename, size_bytes)
     try:
-        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
+        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash, owner_firebase_uid=owner_firebase_uid)
         result = run_resume_pipeline(temp_path, job_description, parsed_resume=parsed_resume)
-        persistence_ids = persist_pipeline_result(settings.database_url, result, job_url=job_url)
+        persistence_ids = persist_pipeline_result(
+            settings.database_url,
+            result,
+            job_url=job_url,
+            owner_firebase_uid=owner_firebase_uid,
+        )
         version_snapshot = None
         if persistence_ids and persistence_ids.get("parsed_resume_id"):
             score_meta = result.optimized.get("metadata", {}).get("scores", {})
@@ -219,6 +376,7 @@ async def analyze_resume(
                     "reason": "Generated an optimized draft from the uploaded resume and job context.",
                     "score_delta": after_total - before_total,
                 },
+                owner_firebase_uid=owner_firebase_uid,
             )
         if version_snapshot:
             result.optimized.setdefault("metadata", {})["version_snapshot"] = version_snapshot
@@ -246,17 +404,26 @@ async def analyze_resume(
 
 
 @app.post("/resume/apply-suggestions")
-async def apply_resume_suggestions(file: UploadFile = File(...), suggestions: str = Form(...)):
+async def apply_resume_suggestions(
+    file: UploadFile = File(...),
+    suggestions: str = Form(...),
+    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+):
     if not suggestions.strip():
         raise HTTPException(status_code=400, detail="Paste at least one suggestion before applying changes.")
 
     filename, temp_path, size_bytes, file_hash = await _store_upload(file)
+    owner_firebase_uid = identity.uid if identity else None
 
     logger.info("Applying resume suggestions file=%s size_bytes=%s", filename, size_bytes)
     try:
-        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash)
+        parsed_resume = _load_parsed_resume(temp_path, filename, file_hash, owner_firebase_uid=owner_firebase_uid)
         result = apply_suggestion_pipeline(temp_path, suggestions, parsed_resume=parsed_resume)
-        persistence_ids = persist_pipeline_result(settings.database_url, result)
+        persistence_ids = persist_pipeline_result(
+            settings.database_url,
+            result,
+            owner_firebase_uid=owner_firebase_uid,
+        )
         version_snapshot = None
         if persistence_ids and persistence_ids.get("parsed_resume_id"):
             readiness_before = int(result.application_readiness.get("score", 0))
@@ -275,6 +442,7 @@ async def apply_resume_suggestions(file: UploadFile = File(...), suggestions: st
                     "reason": "Applied external suggestions to the structured resume.",
                     "score_delta": readiness_after - readiness_before,
                 },
+                owner_firebase_uid=owner_firebase_uid,
             )
         if version_snapshot:
             result.optimized.setdefault("metadata", {})["version_snapshot"] = version_snapshot
@@ -302,7 +470,10 @@ async def apply_resume_suggestions(file: UploadFile = File(...), suggestions: st
 
 
 @app.post("/resume/edit")
-async def edit_resume(payload: ResumeEditRequest):
+async def edit_resume(
+    payload: ResumeEditRequest,
+    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+):
     try:
         edit_result = apply_resume_edit(
             original_document=payload.original_document,
@@ -327,6 +498,7 @@ async def edit_resume(payload: ResumeEditRequest):
                 "target": payload.target.model_dump(),
             },
             parent_version_id=payload.parent_version_id,
+            owner_firebase_uid=identity.uid if identity else None,
         )
         if version_snapshot:
             edit_result["optimized"].setdefault("metadata", {})["version_snapshot"] = version_snapshot
@@ -346,7 +518,10 @@ async def edit_resume(payload: ResumeEditRequest):
 
 
 @app.post("/resume/apply_fixes")
-async def apply_resume_fix_pass(payload: ResumeFixRequest):
+async def apply_resume_fix_pass(
+    payload: ResumeFixRequest,
+    identity: FirebaseIdentity | None = Depends(optional_firebase_identity),
+):
     try:
         fix_result = apply_resume_fixes(
             original_document=payload.original_document,
@@ -372,6 +547,7 @@ async def apply_resume_fix_pass(payload: ResumeFixRequest):
                 )),
             },
             parent_version_id=payload.parent_version_id,
+            owner_firebase_uid=identity.uid if identity else None,
         )
         if version_snapshot:
             fix_result["optimized"].setdefault("metadata", {})["version_snapshot"] = version_snapshot
